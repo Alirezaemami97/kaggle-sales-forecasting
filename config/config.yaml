@@ -1,0 +1,15 @@
+project_name: demand-forecasting
+random_seed: 42
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  models_dir: data/models
+  forecasts_dir: data/forecasts
+
+data:
+  sales_file: sales_train_evaluation.csv
+  calendar_file: calendar.csv
+  prices_file: sell_prices.csv
+  # Fast-dev guardrail: 0 = all 30,490 series; N > 0 = random subsample of N series.
+  subsample_series: 0

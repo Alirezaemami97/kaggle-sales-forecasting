@@ -1,0 +1,39 @@
+# Data — never commit the M5 dataset or derived artifacts
+data/
+
+# MLflow local tracking store
+mlruns/
+mlartifacts/
+
+# Machine-local Poetry config (venv location workaround for Windows MAX_PATH)
+poetry.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Terraform
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Local-only docs — not part of the public repo
+docs/learning/
+DESIGN.md
+AWS_DEPLOYMENT.md
+AWS_DEPLOYMENT.pdf
+CLAUDE.md
+MLOps_Orientation_Primer.md
+
+# OS / editor
+.DS_Store
+Thumbs.db

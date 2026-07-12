@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "alireza-demand-forecasting"
+version = "0.1.0"
+description = "Production-style demand forecasting system (M5) with automated retraining and a deployment harness"
+authors = ["Alirezaemami97"]
+readme = "README.md"
+packages = [{include = "demand_forecasting", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "~3.12"
+pandas = "^2.2"
+pyarrow = ">=15,<22"
+lightgbm = "^4.3"
+pydantic = "^2.7"
+mlflow = "^2.13"
+pyyaml = "^6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+ruff = "^0.4"
+mypy = "^1.10"
+types-pyyaml = "^6.0.12"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["demand_forecasting"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
