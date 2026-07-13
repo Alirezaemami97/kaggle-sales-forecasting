@@ -59,6 +59,12 @@ backtest:
   n_folds: 3                        # rolling-origin folds (expanding window)
   fold_stride: 28                   # days between fold origins
 
+inference:
+  # Series with fewer observed days than this at the origin are cold-start:
+  # forecast from a store+department demand prior, not the model.
+  cold_start_min_history_days: 28
+  prior_window_days: 28             # trailing window for the hierarchy prior
+
 mlflow:
   tracking_uri: sqlite:///mlflow.db
   experiment_name: demand-forecasting

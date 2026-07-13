@@ -70,6 +70,14 @@ class BacktestConfig(BaseModel):
     fold_stride: int = Field(gt=0)
 
 
+class InferenceConfig(BaseModel):
+    # A series with fewer than this many observed days at the origin is treated as
+    # cold-start and forecast from a hierarchy prior instead of the model.
+    cold_start_min_history_days: int = Field(default=28, gt=0)
+    # Trailing window used to build the store+department demand prior.
+    prior_window_days: int = Field(default=28, gt=0)
+
+
 class MLflowConfig(BaseModel):
     tracking_uri: str
     experiment_name: str
@@ -84,6 +92,7 @@ class Config(BaseModel):
     features: FeaturesConfig
     training: TrainingConfig
     backtest: BacktestConfig
+    inference: InferenceConfig = InferenceConfig()
     mlflow: MLflowConfig
 
 
