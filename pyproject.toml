@@ -21,6 +21,15 @@ ruff = "^0.4"
 mypy = "^1.10"
 types-pyyaml = "^6.0.12"
 
+# EDA-only tooling — not installed in CI or Docker (poetry install --with eda)
+[tool.poetry.group.eda]
+optional = true
+
+[tool.poetry.group.eda.dependencies]
+ipykernel = "^6.29"
+nbconvert = "^7.16"
+matplotlib = "^3.8"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
