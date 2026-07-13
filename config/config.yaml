@@ -13,3 +13,11 @@ data:
   prices_file: sell_prices.csv
   # Fast-dev guardrail: 0 = all 30,490 series; N > 0 = random subsample of N series.
   subsample_series: 0
+
+features:
+  # Sales lags in days. A lag-k feature for day t is the sales at day t-k.
+  lags: [7, 28]
+  # Trailing windows for rolling mean/std, always computed on data up to day t-1.
+  rolling_windows: [7, 28]
+  # Drop rows before an item's first listed price (item not yet on sale).
+  drop_pre_release: true

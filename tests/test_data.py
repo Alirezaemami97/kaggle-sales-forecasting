@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from demand_forecasting.config import Config, DataConfig, PathsConfig
+from demand_forecasting.config import Config, DataConfig, FeaturesConfig, PathsConfig
 from demand_forecasting.data.convert import convert_all
 from demand_forecasting.data.loader import load_calendar, load_prices, load_sales
 from demand_forecasting.data.schema import (
@@ -133,6 +133,7 @@ def test_convert_all_writes_parquet(
             prices_file="sell_prices.csv",
             subsample_series=2,
         ),
+        features=FeaturesConfig(lags=[2, 3], rolling_windows=[3], drop_pre_release=True),
     )
 
     convert_all(config)

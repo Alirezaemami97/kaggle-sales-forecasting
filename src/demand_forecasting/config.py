@@ -19,11 +19,18 @@ class DataConfig(BaseModel):
     subsample_series: int = Field(default=0, ge=0)
 
 
+class FeaturesConfig(BaseModel):
+    lags: list[int]
+    rolling_windows: list[int]
+    drop_pre_release: bool
+
+
 class Config(BaseModel):
     project_name: str
     random_seed: int
     paths: PathsConfig
     data: DataConfig
+    features: FeaturesConfig
 
 
 def load_config(path: str | Path = "config/config.yaml") -> Config:
