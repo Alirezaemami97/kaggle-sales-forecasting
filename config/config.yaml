@@ -21,3 +21,28 @@ features:
   rolling_windows: [7, 28]
   # Drop rows before an item's first listed price (item not yet on sale).
   drop_pre_release: true
+
+training:
+  horizon: 28                       # forecast 28 days ahead
+  quantiles: [0.05, 0.25, 0.5, 0.75, 0.95]
+  # Direct multi-horizon: training rows are (origin, horizon) pairs. We sample
+  # origins on a stride to bound the row count (every origin x 28 horizons).
+  n_train_origins: 8
+  origin_stride: 14
+  # 0 = all 30,490 series. A positive cap keeps laptop training to minutes;
+  # scaling to the full catalogue is a config change, not a code change.
+  max_series: 3000
+  lgbm:
+    n_estimators: 300
+    learning_rate: 0.05
+    num_leaves: 63
+    min_child_samples: 100
+
+backtest:
+  n_folds: 3                        # rolling-origin folds (expanding window)
+  fold_stride: 28                   # days between fold origins
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_name: demand-forecasting
+  model_name: demand-forecaster-lgbm

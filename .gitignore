@@ -2,9 +2,10 @@
 # Anchored to repo root: src/demand_forecasting/data/ is code and must be tracked.
 /data/
 
-# MLflow local tracking store
+# MLflow local tracking store + sqlite registry backend
 mlruns/
 mlartifacts/
+mlflow.db
 
 # Machine-local Poetry config (venv location workaround for Windows MAX_PATH)
 poetry.toml

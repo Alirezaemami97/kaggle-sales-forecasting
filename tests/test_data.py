@@ -5,7 +5,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from demand_forecasting.config import Config, DataConfig, FeaturesConfig, PathsConfig
+from demand_forecasting.config import (
+    BacktestConfig,
+    Config,
+    DataConfig,
+    FeaturesConfig,
+    LGBMConfig,
+    MLflowConfig,
+    PathsConfig,
+    TrainingConfig,
+)
 from demand_forecasting.data.convert import convert_all
 from demand_forecasting.data.loader import load_calendar, load_prices, load_sales
 from demand_forecasting.data.schema import (
@@ -134,6 +143,22 @@ def test_convert_all_writes_parquet(
             subsample_series=2,
         ),
         features=FeaturesConfig(lags=[2, 3], rolling_windows=[3], drop_pre_release=True),
+        training=TrainingConfig(
+            horizon=5,
+            quantiles=[0.5],
+            n_train_origins=2,
+            origin_stride=2,
+            max_series=0,
+            lgbm=LGBMConfig(
+                n_estimators=10, learning_rate=0.1, num_leaves=7, min_child_samples=1
+            ),
+        ),
+        backtest=BacktestConfig(n_folds=2, fold_stride=2),
+        mlflow=MLflowConfig(
+            tracking_uri="sqlite:///mlflow.db",
+            experiment_name="test",
+            model_name="test-model",
+        ),
     )
 
     convert_all(config)
