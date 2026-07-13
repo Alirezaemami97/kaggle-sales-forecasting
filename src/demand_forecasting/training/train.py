@@ -16,7 +16,8 @@ import numpy as np
 import pandas as pd
 
 from demand_forecasting.config import Config, load_config
-from demand_forecasting.evaluation.backtest import fold_origins, rolling_origin_backtest
+from demand_forecasting.evaluation.backtest import backtest_predictions, fold_origins
+from demand_forecasting.evaluation.panel import build_panel, save_panel
 from demand_forecasting.training.dataset import build_direct_table, select_origins, to_model_frame
 from demand_forecasting.training.model import QuantileLGBM
 
@@ -71,12 +72,12 @@ def train(config: Config) -> None:
             }
         )
 
-        # 1) Honest backtest (retrains per fold).
+        # 1) Honest backtest (retrains per fold) → full prediction frame → panel.
         folds = fold_origins(
             features, config.backtest.n_folds, config.backtest.fold_stride, horizon
         )
         logger.info("Backtesting on fold origins %s", folds)
-        results = rolling_origin_backtest(
+        preds = backtest_predictions(
             features,
             quantiles,
             params,
@@ -85,22 +86,25 @@ def train(config: Config) -> None:
             config.training.n_train_origins,
             config.training.origin_stride,
         )
-        for _, row in results.iterrows():
-            mlflow.log_metrics(
-                {"wape": row["wape"], "mean_pinball": row["mean_pinball"]},
-                step=int(row["fold_origin"]),
+
+        panel = build_panel(preds, features)
+        panel_dir = save_panel(panel, config.paths.models_dir / "evaluation")
+        mlflow.log_artifacts(str(panel_dir), artifact_path="evaluation")
+
+        # Headline metrics from the panel: bottom-level WAPE, WRMSSE, coverage.
+        by_lvl = panel["by_level"].set_index("level")
+        wrmsse = float(panel["by_level"]["rmsse"].mean())
+        headline = {
+            "wape_item_store": float(by_lvl.loc["item_store", "wape"]),
+            "wape_total": float(by_lvl.loc["total", "wape"]),
+            "wrmsse": wrmsse,
+        }
+        for _, cal in panel["calibration"].iterrows():
+            headline[f"coverage_{int(cal['nominal_coverage'] * 100)}"] = float(
+                cal["empirical_coverage"]
             )
-        mlflow.log_metrics(
-            {
-                "backtest_wape_mean": float(results["wape"].mean()),
-                "backtest_pinball_mean": float(results["mean_pinball"].mean()),
-            }
-        )
-        logger.info(
-            "Backtest mean WAPE %.4f | mean pinball %.4f",
-            results["wape"].mean(),
-            results["mean_pinball"].mean(),
-        )
+        mlflow.log_metrics(headline)
+        logger.info("Panel headline: %s", {k: round(v, 4) for k, v in headline.items()})
 
         # 2) Final model on the most recent origins, then register it.
         train_origins = select_origins(

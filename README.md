@@ -2,7 +2,7 @@
 
 A production-style demand-forecasting system on the [M5 (Walmart) dataset](https://www.kaggle.com/competitions/m5-forecasting-accuracy): 28-day-ahead daily quantile forecasts for 30,490 item-store series, built as packaged, tested, containerised Python — not a notebook. The forecasting model is deliberately bounded; the engineering around it is the point: honest hierarchical evaluation, batch inference, automated retraining, a shadow → A/B deployment harness, and infrastructure as code.
 
-**Status: Milestone 3 (LightGBM baseline + rolling-origin backtest + MLflow) complete.**
+**Status: Milestone 4 (evaluation panel — metric × hierarchy × horizon + calibration) complete.**
 
 ## Problem framing
 
@@ -34,8 +34,8 @@ Forecast error is asymmetric in business terms: **under-forecasting** causes sto
 | 1. Scaffold | Poetry project, CI gate (ruff + mypy + pytest), Dockerfile, data loading + schema validation + Parquet conversion | ✅ done |
 | 2. Features + EDA | Point-in-time feature pipeline (lags, rolling stats, calendar, price) + no-leakage test; isolated EDA notebook | ✅ done |
 | 3. LightGBM baseline | Config-driven global model (per-quantile), MLflow tracking + registry, rolling-origin backtest | ✅ done |
-| 4. Evaluation panel | WAPE/MASE/WRMSSE × hierarchy level × horizon; pinball loss + calibration report | ⏳ next |
-| 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | — |
+| 4. Evaluation panel | WAPE/MASE/WRMSSE × hierarchy level × horizon; pinball loss + calibration report | ✅ done |
+| 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | ⏳ next |
 | 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | — |
 | 7. Continuous Training | Scheduled + trigger-based automated retraining wired to the monitoring signal | — |
 | 8. Deployment harness | Shadow → A/B → promote → rollback on registry stages | — |
