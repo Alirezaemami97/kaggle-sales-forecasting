@@ -119,11 +119,13 @@ def forecast_catalogue(
     warm = generate_forecasts(warm_features, model, quantiles, horizon, origin)
     warm = warm.assign(is_cold_start=False)
 
+    logger.info("Forecast %d warm + %d cold-start series", warm["id"].nunique(), len(cold))
+    if not cold:
+        return warm
+
     priors = hierarchy_priors(features, origin, quantiles, config.inference.prior_window_days)
     cold_df = cold_start_forecasts(features, cold, quantiles, horizon, origin, priors)
     cold_df = cold_df.assign(is_cold_start=True)
-
-    logger.info("Forecast %d warm + %d cold-start series", warm["id"].nunique(), len(cold))
     return pd.concat([warm, cold_df], ignore_index=True)
 
 

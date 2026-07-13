@@ -43,6 +43,14 @@ u8darts = {version = "^0.30", extras = ["torch"]}
 # the project. CPU wheels only; the GPU run is the AWS track.
 torch = ">=2.2,<2.6"
 
+# Drift dashboards (M6) — Evidently is heavy and optional (poetry install --with
+# monitoring). The always-on PSI drift signal in monitoring/drift.py needs none of it.
+[tool.poetry.group.monitoring]
+optional = true
+
+[tool.poetry.group.monitoring.dependencies]
+evidently = "^0.4"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
