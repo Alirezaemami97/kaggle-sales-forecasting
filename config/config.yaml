@@ -13,6 +13,8 @@ data:
   prices_file: sell_prices.csv
   # Fast-dev guardrail: 0 = all 30,490 series; N > 0 = random subsample of N series.
   subsample_series: 0
+  # "" = all states; "CA" restricts to California for the TFT comparison run.
+  state_filter: ""
 
 features:
   # Sales lags in days. A lag-k feature for day t is the sales at day t-k.
@@ -32,11 +34,26 @@ training:
   # 0 = all 30,490 series. A positive cap keeps laptop training to minutes;
   # scaling to the full catalogue is a config change, not a code change.
   max_series: 3000
+  # Which model to train: "lgbm" (baseline) or "tft" (runs the honest comparison).
+  model: lgbm
   lgbm:
     n_estimators: 300
     learning_rate: 0.05
     num_leaves: 63
     min_child_samples: 100
+  # TFT (M5). Deliberately small: CPU-only, CA slice, few epochs — a bounded
+  # local run. Full-scale TFT is the AWS GPU track (docs/AWS_DEPLOYMENT.md).
+  tft:
+    max_series: 120              # compare both models on this many CA series
+    train_history_days: 730      # train on the most recent ~2 years (bounds CPU cost)
+    input_chunk_length: 56       # lookback window (2x the 28-day horizon)
+    hidden_size: 16
+    lstm_layers: 1
+    num_attention_heads: 2
+    dropout: 0.1
+    batch_size: 256
+    n_epochs: 5
+    learning_rate: 0.001
 
 backtest:
   n_folds: 3                        # rolling-origin folds (expanding window)

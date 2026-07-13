@@ -31,6 +31,18 @@ ipykernel = "^6.29"
 nbconvert = "^7.16"
 matplotlib = "^3.8"
 
+# TFT (M5) — heavy deep-learning deps, kept out of CI/Docker (poetry install --with tft).
+# u8darts[torch] pulls only the PyTorch model flavour (no Prophet/statsforecast build pain).
+[tool.poetry.group.tft]
+optional = true
+
+[tool.poetry.group.tft.dependencies]
+u8darts = {version = "^0.30", extras = ["torch"]}
+# Pin below torch 2.6: newer wheels bundle a deeply-nested license tree in
+# dist-info that overflows Windows MAX_PATH (260) even with the venv outside
+# the project. CPU wheels only; the GPU run is the AWS track.
+torch = ">=2.2,<2.6"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

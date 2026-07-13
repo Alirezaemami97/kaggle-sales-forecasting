@@ -16,7 +16,7 @@ import pandas as pd
 Array: TypeAlias = "pd.Series | npt.NDArray[Any] | Sequence[float]"
 
 
-def wape(actual: pd.Series | np.ndarray, predicted: pd.Series | np.ndarray) -> float:
+def wape(actual: Array, predicted: Array) -> float:
     """Weighted Absolute Percentage Error: sum|a-p| / sum|a|.
 
     Volume-weighted (high-selling series count more) and zero-safe unless the
@@ -30,9 +30,7 @@ def wape(actual: pd.Series | np.ndarray, predicted: pd.Series | np.ndarray) -> f
     return float(np.abs(actual - predicted).sum() / denom)
 
 
-def pinball_loss(
-    actual: pd.Series | np.ndarray, predicted: pd.Series | np.ndarray, q: float
-) -> float:
+def pinball_loss(actual: Array, predicted: Array, q: float) -> float:
     """Pinball (quantile) loss at quantile q — the proper scoring rule for a
     quantile forecast. Under-prediction is penalised by q, over-prediction by 1-q,
     so the loss is minimised by the true q-th quantile."""
@@ -42,7 +40,7 @@ def pinball_loss(
     return float(np.mean(np.maximum(q * diff, (q - 1) * diff)))
 
 
-def mean_pinball(actual: pd.Series | np.ndarray, quantile_preds: pd.DataFrame) -> float:
+def mean_pinball(actual: Array, quantile_preds: pd.DataFrame) -> float:
     """Average pinball loss across quantile columns named 'q<value>'."""
     losses = [
         pinball_loss(actual, quantile_preds[col], float(col[1:]))

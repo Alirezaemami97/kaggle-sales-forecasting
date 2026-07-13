@@ -19,8 +19,10 @@ up. That subtlety is itself a senior signal.
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from demand_forecasting.evaluation.metrics import (
@@ -60,7 +62,7 @@ def series_dollar_weights(history: pd.DataFrame, window: int = 28) -> pd.DataFra
     return dollars.rename("weight").reset_index()
 
 
-def _weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
+def _weighted_mean(values: npt.NDArray[Any], weights: npt.NDArray[Any]) -> float:
     """Weighted mean ignoring NaN values (series too short/constant to scale)."""
     mask = ~np.isnan(values)
     if not mask.any() or weights[mask].sum() == 0:

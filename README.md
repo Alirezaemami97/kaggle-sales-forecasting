@@ -2,7 +2,7 @@
 
 A production-style demand-forecasting system on the [M5 (Walmart) dataset](https://www.kaggle.com/competitions/m5-forecasting-accuracy): 28-day-ahead daily quantile forecasts for 30,490 item-store series, built as packaged, tested, containerised Python — not a notebook. The forecasting model is deliberately bounded; the engineering around it is the point: honest hierarchical evaluation, batch inference, automated retraining, a shadow → A/B deployment harness, and infrastructure as code.
 
-**Status: Milestone 4 (evaluation panel — metric × hierarchy × horizon + calibration) complete.**
+**Status: Milestone 5 (TFT via Darts + honest LightGBM-vs-TFT comparison) complete.**
 
 ## Problem framing
 
@@ -35,13 +35,27 @@ Forecast error is asymmetric in business terms: **under-forecasting** causes sto
 | 2. Features + EDA | Point-in-time feature pipeline (lags, rolling stats, calendar, price) + no-leakage test; isolated EDA notebook | ✅ done |
 | 3. LightGBM baseline | Config-driven global model (per-quantile), MLflow tracking + registry, rolling-origin backtest | ✅ done |
 | 4. Evaluation panel | WAPE/MASE/WRMSSE × hierarchy level × horizon; pinball loss + calibration report | ✅ done |
-| 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | ⏳ next |
-| 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | — |
+| 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | ✅ done |
+| 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | ⏳ next |
 | 7. Continuous Training | Scheduled + trigger-based automated retraining wired to the monitoring signal | — |
 | 8. Deployment harness | Shadow → A/B → promote → rollback on registry stages | — |
 | 9. Infrastructure as code | Storage, scheduler, and registry backend defined in Terraform | — |
 
 Phases 1–6 are the MVP: train either model with one command, backtest it honestly, and produce monitored 28-day quantile forecasts for the whole catalogue. Phases 7–9 are the platform layer.
+
+### LightGBM vs TFT — the honest comparison (phase 5)
+
+Both models were trained and backtested on the **same** California slice (120 series, 3 rolling-origin folds) and scored through the **same** evaluation panel, then compared on retraining cost and serving complexity — not accuracy alone.
+
+| level | WAPE (LGBM) | WAPE (TFT) | MASE (LGBM) | MASE (TFT) |
+|---|---|---|---|---|
+| total | 0.351 | **0.311** | 2.81 | **2.49** |
+| store | 0.369 | **0.343** | 1.61 | **1.50** |
+| department | 0.496 | **0.488** | 1.14 | **1.12** |
+| **item-store** (order level) | **0.764** | 0.764 | **0.931** | 0.933 |
+| retrain time (3 folds) | **24 s** | 1550 s (~26 min) | — | — |
+
+The TFT is modestly better at aggregate levels but **ties LightGBM at the item-store level — where replenishment orders are actually placed — for ~64× the retraining cost** and a heavier (torch-runtime) deployment. **The baseline stays the production model.** The transformer's edge may widen with a GPU, full history, and tuning (the AWS track); on this bounded, CPU-only evidence it does not earn its operational cost. Recommending the simpler model, with numbers behind it, is the intended outcome. This run is deliberately bounded (CA slice, 120 series, most-recent 2 years, small network, 5 epochs); full-scale TFT is deferred to the GPU track.
 
 ## Quickstart
 
@@ -61,6 +75,12 @@ poetry run python -m demand_forecasting.features.build --config config/config.ya
 # Train: rolling-origin backtest + final model, tracked and registered in MLflow:
 poetry run python -m demand_forecasting.training.train --config config/config.yaml
 poetry run mlflow ui --backend-store-uri sqlite:///mlflow.db   # inspect runs at http://localhost:5000
+
+# Optional — the TFT comparison (heavy deep-learning deps, not in CI/Docker):
+poetry install --with tft
+# set `training.model: tft` in config, then the same entry point runs the
+# LightGBM-vs-TFT comparison on the CA slice → data/models/comparison/
+poetry run python -m demand_forecasting.training.train --config config/config.yaml
 
 # Quality gate:
 poetry run ruff check src/ tests/ && poetry run mypy src/ && poetry run pytest

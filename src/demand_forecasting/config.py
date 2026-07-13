@@ -17,6 +17,9 @@ class DataConfig(BaseModel):
     prices_file: str
     # 0 means "use every series"; a positive N subsamples N series for fast dev runs.
     subsample_series: int = Field(default=0, ge=0)
+    # "" = all states; a state code (e.g. "CA") restricts to that state — used to
+    # keep the LightGBM-vs-TFT comparison on a CPU-affordable subset.
+    state_filter: str = ""
 
 
 class FeaturesConfig(BaseModel):
@@ -32,13 +35,34 @@ class LGBMConfig(BaseModel):
     min_child_samples: int
 
 
+class TFTConfig(BaseModel):
+    # TFT is CPU-bound here, so it trains on a small CA slice; the LightGBM
+    # comparison runs on the SAME slice. Full-scale TFT is the AWS GPU track.
+    max_series: int = Field(gt=0)
+    # Train on the most recent N days per series (bounds CPU cost; ~2 years still
+    # covers two full yearly cycles). Full history is the AWS GPU track.
+    train_history_days: int = Field(gt=0)
+    input_chunk_length: int = Field(gt=0)  # lookback window fed to the network
+    hidden_size: int = Field(gt=0)
+    lstm_layers: int = Field(gt=0)
+    num_attention_heads: int = Field(gt=0)
+    dropout: float = Field(ge=0.0, lt=1.0)
+    batch_size: int = Field(gt=0)
+    n_epochs: int = Field(gt=0)
+    learning_rate: float = Field(gt=0.0)
+
+
 class TrainingConfig(BaseModel):
     horizon: int = Field(gt=0)
     quantiles: list[float]
     n_train_origins: int = Field(gt=0)
     origin_stride: int = Field(gt=0)
     max_series: int = Field(ge=0)
+    # Which model the entry point trains: "lgbm" (baseline) or "tft" (runs the
+    # honest LightGBM-vs-TFT comparison on the CA slice).
+    model: str = "lgbm"
     lgbm: LGBMConfig
+    tft: TFTConfig | None = None
 
 
 class BacktestConfig(BaseModel):
