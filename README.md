@@ -2,7 +2,7 @@
 
 A production-style demand-forecasting system on the [M5 (Walmart) dataset](https://www.kaggle.com/competitions/m5-forecasting-accuracy): 28-day-ahead daily quantile forecasts for 30,490 item-store series, built as packaged, tested, containerised Python — not a notebook. The forecasting model is deliberately bounded; the engineering around it is the point: honest hierarchical evaluation, batch inference, automated retraining, a shadow → A/B deployment harness, and infrastructure as code.
 
-**Status: Milestone 5 (TFT via Darts + honest LightGBM-vs-TFT comparison) complete.**
+**Status: Milestone 6 complete — MVP done.** One command trains either model and backtests it honestly; a batch job writes monitored 28-day quantile forecasts for the whole catalogue to a prediction archive, with cold-start fallback and drift + forecast-error monitoring.
 
 ## Problem framing
 
@@ -36,7 +36,7 @@ Forecast error is asymmetric in business terms: **under-forecasting** causes sto
 | 3. LightGBM baseline | Config-driven global model (per-quantile), MLflow tracking + registry, rolling-origin backtest | ✅ done |
 | 4. Evaluation panel | WAPE/MASE/WRMSSE × hierarchy level × horizon; pinball loss + calibration report | ✅ done |
 | 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | ✅ done |
-| 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | ⏳ next |
+| 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | ✅ done |
 | 7. Continuous Training | Scheduled + trigger-based automated retraining wired to the monitoring signal | — |
 | 8. Deployment harness | Shadow → A/B → promote → rollback on registry stages | — |
 | 9. Infrastructure as code | Storage, scheduler, and registry backend defined in Terraform | — |
@@ -76,11 +76,20 @@ poetry run python -m demand_forecasting.features.build --config config/config.ya
 poetry run python -m demand_forecasting.training.train --config config/config.yaml
 poetry run mlflow ui --backend-store-uri sqlite:///mlflow.db   # inspect runs at http://localhost:5000
 
+# Batch inference: 28-day quantile forecasts for the catalogue → prediction archive:
+poetry run python -m demand_forecasting.inference.batch --config config/config.yaml
+
+# Monitoring: operational health + forecast error + PSI data drift on the archive:
+poetry run python -m demand_forecasting.monitoring.run --config config/config.yaml
+
 # Optional — the TFT comparison (heavy deep-learning deps, not in CI/Docker):
 poetry install --with tft
 # set `training.model: tft` in config, then the same entry point runs the
 # LightGBM-vs-TFT comparison on the CA slice → data/models/comparison/
 poetry run python -m demand_forecasting.training.train --config config/config.yaml
+
+# Optional — rich Evidently drift report:
+poetry install --with monitoring
 
 # Quality gate:
 poetry run ruff check src/ tests/ && poetry run mypy src/ && poetry run pytest
