@@ -35,8 +35,6 @@ You pay for **running** resources, not for "having a project". The whole build i
 3. **Shut down SageMaker Studio apps** after every session; never leave a NAT Gateway or stuck job running.
 4. **Cap** Automatic Model Tuning (6–8 jobs) and keep **GPU** runs short, few, on a subset, on **Spot**.
 
-See **`PROGRESS.md`** for the full phase-by-phase tracker — status, what's built, why, and verified results for each of the ten phases (0–9).
-
 ## Phases
 
 | Phase | Scope | Status |
