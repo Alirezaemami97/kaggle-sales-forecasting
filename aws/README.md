@@ -35,22 +35,22 @@ You pay for **running** resources, not for "having a project". The whole build i
 3. **Shut down SageMaker Studio apps** after every session; never leave a NAT Gateway or stuck job running.
 4. **Cap** Automatic Model Tuning (6–8 jobs) and keep **GPU** runs short, few, on a subset, on **Spot**.
 
-See `PHASE0_CHECKLIST.md` for the one-time account-hardening steps.
+See **`PROGRESS.md`** for the full phase-by-phase tracker — status, what's built, why, and verified results for each of the ten phases (0–9).
 
 ## Phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | Account hardening (MFA, IAM, Budgets, Region lock) | runbook: `PHASE0_CHECKLIST.md` |
-| 1 | Data into S3 as Parquet; queryable with Athena | **this increment** |
-| 2 | Glue join + Data Quality + Feature Store | — |
-| 3 | Train LightGBM as a SageMaker training job | — |
-| 4 | Evaluation + tuning + DeepAR + TFT (GPU Spot) | — |
-| 5 | Batch Transform → forecasts archive | — |
-| 6 | SageMaker Pipeline + EventBridge schedule | — |
-| 7 | Model Monitor + CloudWatch + retrain trigger | — |
-| 8 | Shadow + A/B deployment harness | — |
-| 9 | CDK (all infra as code) + CodePipeline CI/CD | — |
+| 0 | Account hardening (MFA, IAM, Budgets, Region lock) | ✅ done |
+| 1 | Data into S3 as Parquet; queryable with Athena | ✅ done |
+| 2 | Glue join + Data Quality + Feature Store | 🔜 next |
+| 3 | Train LightGBM as a SageMaker training job | ⬜ |
+| 4 | Evaluation + tuning + DeepAR + TFT (GPU Spot) | ⬜ |
+| 5 | Batch Transform → forecasts archive | ⬜ |
+| 6 | SageMaker Pipeline + EventBridge schedule | ⬜ |
+| 7 | Model Monitor + CloudWatch + retrain trigger | ⬜ |
+| 8 | Shadow + A/B deployment harness | ⬜ |
+| 9 | CDK (all infra as code) + CodePipeline CI/CD | ⬜ |
 
 ## Phase 1 — run it
 
