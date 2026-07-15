@@ -7,6 +7,12 @@ LOCATION at that prefix:
     raw/calendar/calendar.parquet
     raw/prices/prices.parquet
 
+sales_long and calendar come from the staging dir (aws_staging/) — prep_athena_data
+melts sales to long format there and rewrites calendar's `date` column as a string
+(Spark's Parquet reader can't read pandas' nanosecond timestamps; see
+prep_athena_data.py). prices has no timestamp column, so it's uploaded as-is from
+data/processed/.
+
     python aws/scripts/upload_data.py --bucket demand-forecasting-<your-suffix>
 """
 
@@ -34,7 +40,7 @@ def upload_all(
     s3 = s3 or boto3.client("s3")
     uploads = [
         (staging_dir / "sales_long.parquet", "raw/sales_long/sales_long.parquet"),
-        (processed_dir / "calendar.parquet", "raw/calendar/calendar.parquet"),
+        (staging_dir / "calendar.parquet", "raw/calendar/calendar.parquet"),
         (processed_dir / "prices.parquet", "raw/prices/prices.parquet"),
     ]
     for local, key in uploads:

@@ -24,8 +24,11 @@ STORED AS PARQUET
 LOCATION 's3://<BUCKET>/raw/sales_long/';
 
 -- Calendar attributes keyed by day id (d = 'd_1' .. 'd_1969').
+-- date is a plain 'YYYY-MM-DD' string, not a timestamp: Spark's Parquet reader
+-- (used by the Phase-2 Glue job) can't read the nanosecond timestamps pandas
+-- writes, and the calendar's real join/lag key is the integer `d`, not `date`.
 CREATE EXTERNAL TABLE IF NOT EXISTS demand_forecasting.calendar (
-  date          timestamp,
+  date          string,
   wm_yr_wk      int,
   weekday       string,
   wday          int,

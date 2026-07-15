@@ -1,9 +1,20 @@
-"""Prepare a slim, long-format sales table for Athena SQL / EDA.
+"""Prepare Athena/Glue-safe staging Parquet from the local processed data.
 
-The wide sales table (1,941 day columns) is unusable for SQL; Athena wants long
-rows. We reuse the repo's own `melt_sales`, so the local and cloud views of the
-data agree exactly, and write a compact Parquet ready to upload to
-`s3://<bucket>/raw/sales_long/`.
+Two fixes over uploading data/processed/ directly:
+
+1. The wide sales table (1,941 day columns) is unusable for SQL; Athena wants
+   long rows. We reuse the repo's own `melt_sales`, so the local and cloud views
+   of the data agree exactly, and write a compact Parquet ready to upload to
+   `s3://<bucket>/raw/sales_long/`.
+2. pandas/pyarrow writes datetime64[ns] columns as Parquet TIMESTAMP(NANOS),
+   which Spark's Parquet reader (used by AWS Glue) cannot read at all — it
+   fails at schema-inference time with "Illegal Parquet type: INT64
+   (TIMESTAMP(NANOS,false))", before any column is even selected. Athena's
+   engine (Trino) has no such issue, which is why Phase 1 never caught this.
+   calendar's `date` column is never used in date arithmetic downstream (the
+   integer `d` column is the real join/lag key), so we cast it to a plain
+   'YYYY-MM-DD' string for the AWS copy — unambiguous for every reader. The
+   local data/processed/calendar.parquet is untouched.
 
     python aws/scripts/prep_athena_data.py     # data/processed/ → data/aws_staging/
 """
@@ -28,15 +39,30 @@ def to_sales_long(sales_wide: pd.DataFrame) -> pd.DataFrame:
     return long[SALES_LONG_COLS]
 
 
+def prepare_calendar(calendar: pd.DataFrame) -> pd.DataFrame:
+    """Cast `date` to a plain 'YYYY-MM-DD' string — Spark's Parquet reader cannot
+    read the nanosecond-precision timestamp pandas/pyarrow writes by default."""
+    out = calendar.copy()
+    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+    return out
+
+
 def build(processed_dir: Path, out_dir: Path) -> Path:
-    """Read the wide sales Parquet, melt to long, write sales_long.parquet."""
+    """Read the processed Parquet, apply the AWS-safe transforms, write staging."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     sales = pd.read_parquet(processed_dir / "sales.parquet")
     long = to_sales_long(sales)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / "sales_long.parquet"
-    long.to_parquet(out, index=False)
-    logger.info("Wrote %d long rows to %s", len(long), out)
-    return out
+    sales_out = out_dir / "sales_long.parquet"
+    long.to_parquet(sales_out, index=False)
+    logger.info("Wrote %d long rows to %s", len(long), sales_out)
+
+    calendar = pd.read_parquet(processed_dir / "calendar.parquet")
+    calendar_out = out_dir / "calendar.parquet"
+    prepare_calendar(calendar).to_parquet(calendar_out, index=False)
+    logger.info("Wrote Glue-safe calendar to %s", calendar_out)
+
+    return sales_out
 
 
 def main() -> None:

@@ -17,6 +17,36 @@ def test_to_sales_long_shape_and_columns(sales_df: pd.DataFrame) -> None:
     assert long["sales"].notna().all()
 
 
+def test_prepare_calendar_casts_date_to_string(calendar_df: pd.DataFrame) -> None:
+    # pandas/pyarrow writes datetime64[ns] as Parquet TIMESTAMP(NANOS), which
+    # Spark's Parquet reader (Glue) cannot read at all. Casting to a plain
+    # 'YYYY-MM-DD' string sidesteps the incompatibility for every reader.
+    # The fixture stores `date` as a string already (for the feature-pipeline
+    # tests); the real data/processed/calendar.parquet is datetime64[ns], so
+    # convert here to match production input.
+    calendar = calendar_df.assign(date=pd.to_datetime(calendar_df["date"]))
+    out = prep_athena_data.prepare_calendar(calendar)
+    assert out["date"].dtype == object
+    assert (out["date"] == calendar_df["date"]).all()  # already 'YYYY-MM-DD' strings
+    assert out["date"].iloc[0] == "2011-01-29"  # the real M5 start date
+    # Every other column is untouched.
+    assert list(out.columns) == list(calendar.columns)
+
+
+def test_build_sample_adds_record_id_and_event_time(feature_table: pd.DataFrame) -> None:
+    import feature_store_ingest
+
+    sample = feature_store_ingest.build_sample(feature_table, max_rows=5)
+    assert len(sample) == 5
+    assert (sample["record_id"] == sample["id"].astype(str) + "_" + sample["d"].astype(str)).all()
+    # sorted by (id, d) ascending, so the first row is S1's day 1 — the M5 epoch itself.
+    assert sample.iloc[0]["id"] == "S1"
+    assert sample.iloc[0]["d"] == 1
+    assert sample.iloc[0]["event_time"] == "2011-01-29T00:00:00Z"
+    # event_time advances one calendar day per unit of `d`.
+    assert sample.iloc[1]["event_time"] == "2011-01-30T00:00:00Z"
+
+
 def test_s3_setup_creates_configured_bucket() -> None:
     pytest.importorskip("moto")
     import boto3
