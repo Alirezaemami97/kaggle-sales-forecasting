@@ -1,0 +1,9 @@
+Rules = [
+    IsComplete "id",
+    IsComplete "d",
+    ColumnValues "sales" >= 0,
+    ColumnValues "sell_price" > 0,
+    ColumnValues "d" >= 1,
+    ColumnValues "d" <= 2000,
+    RowCount > 40000000
+]
