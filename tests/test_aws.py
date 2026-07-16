@@ -84,11 +84,15 @@ def test_apply_overrides_with_nothing_supplied_is_a_no_op() -> None:
 def test_apply_overrides_rejects_an_invalid_hyperparameter() -> None:
     # Overrides are re-validated, so a hyperparameter that violates a Config
     # constraint fails immediately rather than deep inside training, after the
-    # instance has spun up and pulled the data. Note this only protects fields
-    # Config actually constrains — LGBMConfig's knobs are currently unbounded.
+    # instance has spun up and pulled the data. LGBMConfig is bounded too since
+    # 4b — AMT draws exactly those knobs, so a bad draw must die in validation.
     config = load_config("config/config.yaml")
     with pytest.raises(ValidationError):
         train_entry.apply_overrides(config, {"horizon": 0})
+    with pytest.raises(ValidationError):
+        train_entry.apply_overrides(config, {"num_leaves": 1})
+    with pytest.raises(ValidationError):
+        train_entry.apply_overrides(config, {"learning_rate": 1.5})
 
 
 def test_build_hyperparameters_omits_unset_values() -> None:
@@ -130,6 +134,45 @@ def test_load_features_pushes_the_series_cap_into_the_scan(
         config, {"max_series": 2}
     ))
     assert sorted(again["id"].unique()) == sorted(kept)
+
+
+def test_split_holdout_holds_out_the_newest_origin() -> None:
+    # The tuner must validate at the leading edge of history, never randomly.
+    assert train_entry.split_holdout([10, 24, 38]) == ([10, 24], 38)
+    with pytest.raises(ValueError):
+        train_entry.split_holdout([38])
+
+
+def test_tuning_settings_caps_pilot_and_full_runs() -> None:
+    import run_tuning
+
+    pilot = run_tuning.tuning_settings(pilot=True)
+    full = run_tuning.tuning_settings(pilot=False)
+    assert pilot == {"max_jobs": 2, "max_parallel_jobs": 1, "max_series": 300}
+    # The full run must respect the 6-8 job cost ceiling from the AWS plan.
+    assert full["max_jobs"] <= 8
+    assert full["max_parallel_jobs"] <= full["max_jobs"]
+
+
+def test_train_holdout_mode_emits_the_objective_metric(
+    feature_table: pd.DataFrame, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The AMT objective only exists if holdout mode prints METRIC val_wape —
+    a silent regression here would make every tuning job fail metric-less."""
+    features_dir = tmp_path / "features"
+    features_dir.mkdir()
+    feature_table.to_parquet(features_dir / "part-00000.parquet", index=False)
+
+    config = load_config("config/config.yaml")
+    config = train_entry.apply_overrides(config, {"max_series": 3, "n_estimators": 5})
+    with caplog.at_level("INFO"):
+        train_entry.train(config, features_dir, tmp_path / "model", validation_mode="holdout")
+
+    metric_lines = [r.getMessage() for r in caplog.records if "METRIC val_wape=" in r.getMessage()]
+    assert len(metric_lines) == 1
+    val_wape = float(metric_lines[0].split("=")[1])
+    assert val_wape >= 0.0
+    assert (tmp_path / "model" / "meta.json").exists()
 
 
 def test_code_files_layout_supports_the_container_imports() -> None:

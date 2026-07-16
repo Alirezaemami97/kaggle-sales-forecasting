@@ -29,10 +29,12 @@ class FeaturesConfig(BaseModel):
 
 
 class LGBMConfig(BaseModel):
-    n_estimators: int
-    learning_rate: float
-    num_leaves: int
-    min_child_samples: int
+    # Bounded so a bad hyperparameter (hand-edited or drawn by SageMaker AMT)
+    # fails at config validation, before any training compute is spent.
+    n_estimators: int = Field(gt=0)
+    learning_rate: float = Field(gt=0.0, lt=1.0)
+    num_leaves: int = Field(gt=1)  # LightGBM needs at least one split
+    min_child_samples: int = Field(gt=0)
 
 
 class TFTConfig(BaseModel):

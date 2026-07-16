@@ -87,6 +87,52 @@ def build_hyperparameters(max_series: int | None, n_estimators: int | None) -> d
     return hyperparameters
 
 
+def build_estimator(
+    uri: str,
+    role_arn: str,
+    instance_type: str,
+    bucket: str,
+    hyperparameters: dict[str, object],
+    session: Any,
+) -> Any:
+    """The one Estimator definition, shared by the plain training run and the
+    tuner (run_tuning.py) — so a tuned job and a baseline job cannot drift in
+    image, code delivery, or metric scraping."""
+    from sagemaker.estimator import Estimator
+
+    return Estimator(
+        image_uri=uri,
+        entry_point="train_entry.py",
+        source_dir="aws/sagemaker",
+        # Ship the portable package + config into the container unchanged.
+        dependencies=["src/demand_forecasting", "config/config.yaml"],
+        role=role_arn,
+        instance_type=instance_type,
+        instance_count=1,
+        base_job_name=BASE_JOB_NAME,
+        output_path=f"s3://{bucket}/models/",
+        sagemaker_session=session,
+        hyperparameters=hyperparameters,
+        metric_definitions=METRIC_DEFINITIONS,
+        tags=[{"Key": "project", "Value": "demand-forecasting"}],
+    )
+
+
+def default_image_uri(boto_session: Any, override: str | None) -> str:
+    """Resolve the training image: an explicit --image-uri, else this account's
+    :latest in the Phase-3 repository."""
+    from build_and_push_image import REPOSITORY, image_uri
+
+    if override:
+        return override
+    return image_uri(
+        boto_session.client("sts").get_caller_identity()["Account"],
+        boto_session.region_name,
+        REPOSITORY,
+        "latest",
+    )
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
@@ -109,34 +155,19 @@ def main() -> None:
     import boto3
     import sagemaker
     import sagemaker_compat
-    from build_and_push_image import REPOSITORY, image_uri
-    from sagemaker.estimator import Estimator
 
     sagemaker_compat.apply()  # Windows SDK infinite-loop fix; see sagemaker_compat.py
 
     boto_session = boto3.Session()
     session = sagemaker.Session(boto_session=boto_session)
-    uri = args.image_uri or image_uri(
-        boto_session.client("sts").get_caller_identity()["Account"],
-        boto_session.region_name,
-        REPOSITORY,
-        "latest",
-    )
-    estimator = Estimator(
-        image_uri=uri,
-        entry_point="train_entry.py",
-        source_dir="aws/sagemaker",
-        # Ship the portable package + config into the container unchanged.
-        dependencies=["src/demand_forecasting", "config/config.yaml"],
-        role=args.role_arn,
-        instance_type=args.instance_type,
-        instance_count=1,
-        base_job_name=BASE_JOB_NAME,
-        output_path=f"s3://{args.bucket}/models/",
-        sagemaker_session=session,
-        hyperparameters=build_hyperparameters(args.max_series, args.n_estimators),
-        metric_definitions=METRIC_DEFINITIONS,
-        tags=[{"Key": "project", "Value": "demand-forecasting"}],
+    uri = default_image_uri(boto_session, args.image_uri)
+    estimator = build_estimator(
+        uri,
+        args.role_arn,
+        args.instance_type,
+        args.bucket,
+        build_hyperparameters(args.max_series, args.n_estimators),
+        session,
     )
 
     name = trial_name()

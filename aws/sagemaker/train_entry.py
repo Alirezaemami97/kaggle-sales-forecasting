@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from demand_forecasting.config import Config, load_config
+from demand_forecasting.evaluation.metrics import wape
 from demand_forecasting.training.dataset import (
     DYNAMIC_COLS,
     STATIC_COLS,
@@ -39,7 +40,7 @@ from demand_forecasting.training.dataset import (
     select_origins,
     to_model_frame,
 )
-from demand_forecasting.training.model import QuantileLGBM, lgbm_params
+from demand_forecasting.training.model import QuantileLGBM, lgbm_params, quantile_column
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +56,8 @@ def apply_overrides(config: Config, overrides: dict[str, object]) -> Config:
     Rebuilds through `Config(**raw)` rather than `model_copy(update=...)`: the
     latter assigns without validating, leaving nested dicts un-coerced (so
     `config.training.horizon` would blow up mid-job). Re-validating also rejects
-    overrides that violate a Config constraint before the instance has pulled any
-    data — though note LGBMConfig's knobs are currently unbounded, so that safety
-    net only covers the fields Config actually constrains.
+    overrides that violate a Config constraint — including the LGBM knobs AMT
+    draws — before the instance has pulled any data.
     """
     raw = config.model_dump()
     training = raw["training"]
@@ -114,23 +114,51 @@ def load_features(features_dir: Path, config: Config) -> pd.DataFrame:
     return dataset.to_table(columns=columns, filter=row_filter).to_pandas()
 
 
-def train(config: Config, features_dir: Path, model_dir: Path) -> None:
+def split_holdout(origins: list[int]) -> tuple[list[int], int]:
+    """Split origins into (train, holdout) with the NEWEST origin held out.
+
+    Validating on the most recent data — never a random split — is the
+    time-series analogue of the backtest's "never see the future" rule: the
+    tuner should prefer hyperparameters that work where production will live,
+    at the leading edge of history. Pure — unit-tested in CI.
+    """
+    if len(origins) < 2:
+        raise ValueError(f"holdout validation needs >= 2 origins, got {origins}")
+    return origins[:-1], origins[-1]
+
+
+def train(config: Config, features_dir: Path, model_dir: Path, validation_mode: str) -> None:
     random.seed(config.random_seed)
     np.random.seed(config.random_seed)
 
     features = load_features(features_dir, config)
     logger.info("Loaded features: %d rows, %d series", len(features), features["id"].nunique())
 
+    horizon = config.training.horizon
     origins = select_origins(
-        features, config.training.n_train_origins, config.training.origin_stride,
-        config.training.horizon,
+        features, config.training.n_train_origins, config.training.origin_stride, horizon
     )
-    table = build_direct_table(features, origins, config.training.horizon)
+
+    # Holdout mode (used by AMT): train WITHOUT the newest origin, score on it,
+    # and print the val_wape line the tuner's metric regex scrapes as its
+    # objective. The tuner can only optimise what escapes the container.
+    holdout: int | None = None
+    if validation_mode == "holdout":
+        origins, holdout = split_holdout(origins)
+
+    table = build_direct_table(features, origins, horizon)
     logger.info("Training table: %d rows over origins %s", len(table), origins)
 
     model = QuantileLGBM(config.training.quantiles, lgbm_params(config))
     model.fit(to_model_frame(table), table["sales"])
     model.save(model_dir)
+
+    if holdout is not None:
+        val_table = build_direct_table(features, [holdout], horizon)
+        preds = model.predict(to_model_frame(val_table))
+        val_wape = wape(val_table["sales"], preds[quantile_column(0.5)])
+        logger.info("METRIC val_wape=%.6f", val_wape)
+        logger.info("Holdout origin %d: %d validation rows", holdout, len(val_table))
 
     # SageMaker Experiments scrapes stdout for the metric regexes declared on the
     # Estimator, so a printed line is how a metric leaves this container.
@@ -157,10 +185,13 @@ def main() -> None:
     parser.add_argument("--num-leaves", type=int)
     parser.add_argument("--min-child-samples", type=int)
     parser.add_argument("--state-filter")
+    # A value, not a store_true flag: SageMaker passes every hyperparameter as
+    # "--key value", so boolean flags cannot travel through the tuner.
+    parser.add_argument("--validation-mode", choices=["none", "holdout"], default="none")
     args = parser.parse_args()
 
     config = apply_overrides(load_config(args.config), vars(args))
-    train(config, Path(args.features_dir), Path(args.model_dir))
+    train(config, Path(args.features_dir), Path(args.model_dir), args.validation_mode)
 
 
 if __name__ == "__main__":
