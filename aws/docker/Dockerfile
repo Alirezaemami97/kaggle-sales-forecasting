@@ -31,7 +31,8 @@ RUN pip install --no-cache-dir \
     "numpy>=1.26,<2" \
     "pyarrow>=15,<21" \
     "pydantic>=2.6,<3" \
-    "pyyaml>=6,<7"
+    "pyyaml>=6,<7" \
+    "tabulate>=0.9,<1"
 
 # Unbuffered stdout matters: SageMaker scrapes metric regexes from the log
 # stream, and buffered output can be lost entirely if the job fails.
