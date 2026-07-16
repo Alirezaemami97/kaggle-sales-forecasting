@@ -18,12 +18,26 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from demand_forecasting.config import Config
 from demand_forecasting.training.dataset import CATEGORICAL_COLS
 
 
 def quantile_column(q: float) -> str:
     """Stable column name for a quantile, e.g. 0.5 -> 'q0.5'."""
     return f"q{q}"
+
+
+def lgbm_params(config: Config) -> dict[str, object]:
+    """Booster params from config — the single source of truth for both the local
+    entry point and the SageMaker training job, so the two cannot drift apart."""
+    lg = config.training.lgbm
+    return {
+        "n_estimators": lg.n_estimators,
+        "learning_rate": lg.learning_rate,
+        "num_leaves": lg.num_leaves,
+        "min_child_samples": lg.min_child_samples,
+        "seed": config.random_seed,
+    }
 
 
 class QuantileLGBM:

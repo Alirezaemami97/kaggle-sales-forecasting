@@ -12,7 +12,11 @@ correct:
 The model also sees `horizon` itself, so one model covers all 28 days.
 """
 
+import logging
+
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Static series identity (does not depend on origin or horizon).
 STATIC_COLS = ["item_id", "dept_id", "cat_id", "store_id", "state_id"]
@@ -40,6 +44,25 @@ TARGET_KNOWN_COLS = [
 CATEGORICAL_COLS = STATIC_COLS + ["wday", "month", "event_name_1", "event_type_1", "snap"]
 NUMERIC_COLS = DYNAMIC_COLS + ["horizon", "sell_price", "price_rel_dept"]
 FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS
+
+
+def cap_series(features: pd.DataFrame, max_series: int, seed: int) -> pd.DataFrame:
+    """Deterministically restrict to `max_series` series (0 = keep all)."""
+    if max_series <= 0 or features["id"].nunique() <= max_series:
+        return features
+    ids = pd.Series(features["id"].unique())
+    keep = ids.sample(n=max_series, random_state=seed)
+    logger.info("Capped to %d series (of %d)", max_series, len(ids))
+    return features[features["id"].isin(keep)].reset_index(drop=True)
+
+
+def filter_state(features: pd.DataFrame, state: str) -> pd.DataFrame:
+    """Restrict to one state (e.g. CA); '' keeps all states."""
+    if not state:
+        return features
+    out = features[features["state_id"].astype(str) == state].reset_index(drop=True)
+    logger.info("Filtered to state %s: %d series", state, out["id"].nunique())
+    return out
 
 
 def select_origins(features: pd.DataFrame, n_origins: int, stride: int, horizon: int) -> list[int]:

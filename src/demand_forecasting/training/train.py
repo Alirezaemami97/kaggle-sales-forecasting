@@ -19,40 +19,16 @@ import pandas as pd
 from demand_forecasting.config import Config, load_config
 from demand_forecasting.evaluation.backtest import backtest_predictions, fold_origins
 from demand_forecasting.evaluation.panel import build_panel, save_panel
-from demand_forecasting.training.dataset import build_direct_table, select_origins, to_model_frame
-from demand_forecasting.training.model import QuantileLGBM
+from demand_forecasting.training.dataset import (
+    build_direct_table,
+    cap_series,
+    filter_state,
+    select_origins,
+    to_model_frame,
+)
+from demand_forecasting.training.model import QuantileLGBM, lgbm_params
 
 logger = logging.getLogger(__name__)
-
-
-def _cap_series(features: pd.DataFrame, max_series: int, seed: int) -> pd.DataFrame:
-    """Deterministically restrict to `max_series` series (0 = keep all)."""
-    if max_series <= 0 or features["id"].nunique() <= max_series:
-        return features
-    ids = pd.Series(features["id"].unique())
-    keep = ids.sample(n=max_series, random_state=seed)
-    logger.info("Capped to %d series (of %d)", max_series, len(ids))
-    return features[features["id"].isin(keep)].reset_index(drop=True)
-
-
-def _filter_state(features: pd.DataFrame, state: str) -> pd.DataFrame:
-    """Restrict to one state (e.g. CA); '' keeps all states."""
-    if not state:
-        return features
-    out = features[features["state_id"].astype(str) == state].reset_index(drop=True)
-    logger.info("Filtered to state %s: %d series", state, out["id"].nunique())
-    return out
-
-
-def _lgbm_params(config: Config) -> dict[str, object]:
-    lg = config.training.lgbm
-    return {
-        "n_estimators": lg.n_estimators,
-        "learning_rate": lg.learning_rate,
-        "num_leaves": lg.num_leaves,
-        "min_child_samples": lg.min_child_samples,
-        "seed": config.random_seed,
-    }
 
 
 def train(config: Config) -> None:
@@ -60,13 +36,13 @@ def train(config: Config) -> None:
     np.random.seed(config.random_seed)
 
     features = pd.read_parquet(config.paths.processed_dir / "features.parquet")
-    features = _filter_state(features, config.data.state_filter)
-    features = _cap_series(features, config.training.max_series, config.random_seed)
+    features = filter_state(features, config.data.state_filter)
+    features = cap_series(features, config.training.max_series, config.random_seed)
     logger.info("Loaded features: %d rows, %d series", len(features), features["id"].nunique())
 
     horizon = config.training.horizon
     quantiles = config.training.quantiles
-    params = _lgbm_params(config)
+    params = lgbm_params(config)
 
     mlflow.set_tracking_uri(config.mlflow.tracking_uri)
     mlflow.set_experiment(config.mlflow.experiment_name)
@@ -163,7 +139,7 @@ def compare(config: Config) -> None:
         raise ValueError("training.tft config is required when training.model == 'tft'")
 
     features = pd.read_parquet(config.paths.processed_dir / "features.parquet")
-    features = _filter_state(features, config.data.state_filter or "CA")
+    features = filter_state(features, config.data.state_filter or "CA")
 
     folds = fold_origins(features, config.backtest.n_folds, config.backtest.fold_stride, horizon)
     # Pick the shared series set once, so both models see EXACTLY the same series.
@@ -186,7 +162,7 @@ def compare(config: Config) -> None:
         # LightGBM on the shared slice.
         t0 = time.perf_counter()
         lgbm_preds = backtest_predictions(
-            features, quantiles, _lgbm_params(config), horizon, folds,
+            features, quantiles, lgbm_params(config), horizon, folds,
             config.training.n_train_origins, config.training.origin_stride,
         )
         lgbm_secs = time.perf_counter() - t0
