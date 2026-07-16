@@ -249,6 +249,25 @@ def test_deepar_jsonl_trims_zeros_and_splits_train_test() -> None:
     assert all(isinstance(v, int) for v in test["cat"])
 
 
+def test_clarify_frame_binarises_the_label_and_derives_the_facet() -> None:
+    import run_clarify
+
+    sales = pd.DataFrame(
+        {
+            "id": ["A", "A", "B", "B"],
+            "store_id": ["CA_1", "CA_1", "TX_2", "TX_2"],
+            "dept_id": ["FOODS_1", "FOODS_1", "HOBBIES_2", "HOBBIES_2"],
+            "d": [1, 2, 1, 2],
+            "sales": [0, 3, 5, 0],
+        }
+    )
+    frame = run_clarify.build_clarify_frame(sales)
+    # Column order must match DataConfig headers exactly — Clarify reads by position.
+    assert list(frame.columns) == run_clarify.CLARIFY_COLUMNS
+    assert frame["sold"].tolist() == [0, 1, 1, 0]
+    assert frame["state_id"].tolist() == ["CA", "CA", "TX", "TX"]
+
+
 def test_already_exists_recognises_both_signal_shapes() -> None:
     """Re-running any setup script must be safe, and SageMaker's create APIs
     signal a duplicate as an untyped ValidationException — the message is the
