@@ -132,6 +132,43 @@ def test_load_features_pushes_the_series_cap_into_the_scan(
     assert sorted(again["id"].unique()) == sorted(kept)
 
 
+def test_code_files_layout_supports_the_container_imports() -> None:
+    """The staged code tree must let evaluate_entry do `from train_entry import`
+    and `import demand_forecasting` with PYTHONPATH at the code root: entry
+    scripts + config.yaml at the root, the package as a subtree."""
+    import run_evaluation
+
+    pairs = dict(
+        (key, local) for local, key in run_evaluation.code_files(run_evaluation.REPO_ROOT)
+    )
+    assert "evaluate_entry.py" in pairs
+    assert "train_entry.py" in pairs
+    assert "config.yaml" in pairs
+    assert "demand_forecasting/config.py" in pairs
+    assert "demand_forecasting/training/model.py" in pairs
+    # Every staged file actually exists locally (a rename would break the job
+    # only at container start otherwise).
+    for key, local in pairs.items():
+        assert local.exists(), f"staged file missing locally: {key}"
+
+
+def test_evaluate_entry_writes_the_panel(feature_table: pd.DataFrame, tmp_path: Path) -> None:
+    """End-to-end wiring of the Processing entry point on the synthetic fixture —
+    the free local check that replaces a billed cloud round-trip."""
+    import evaluate_entry
+
+    features_dir = tmp_path / "features"
+    features_dir.mkdir()
+    feature_table.to_parquet(features_dir / "part-00000.parquet", index=False)
+
+    config = load_config("config/config.yaml")
+    config = train_entry.apply_overrides(config, {"max_series": 3, "n_estimators": 5})
+    out = evaluate_entry.evaluate(config, features_dir, tmp_path / "panel")
+
+    for name in ["by_level.csv", "by_horizon.csv", "calibration.csv", "panel.md"]:
+        assert (out / name).exists(), f"missing panel artifact: {name}"
+
+
 def test_already_exists_recognises_both_signal_shapes() -> None:
     """Re-running any setup script must be safe, and SageMaker's create APIs
     signal a duplicate as an untyped ValidationException — the message is the
