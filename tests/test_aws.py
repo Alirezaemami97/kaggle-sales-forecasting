@@ -212,6 +212,43 @@ def test_evaluate_entry_writes_the_panel(feature_table: pd.DataFrame, tmp_path: 
         assert (out / name).exists(), f"missing panel artifact: {name}"
 
 
+def test_deepar_jsonl_trims_zeros_and_splits_train_test() -> None:
+    import json
+
+    import prep_deepar_data
+
+    n = prep_deepar_data.PREDICTION_LENGTH
+    days = list(range(1, 2 * n + 12))  # 67 days
+    frames = []
+    # S1: first sale on day 6 — leading zeros must be trimmed.
+    frames.append(pd.DataFrame({
+        "id": "S1", "store_id": "CA_1", "dept_id": "FOODS_1", "d": days,
+        "sales": [0] * 5 + [2] * (len(days) - 5),
+    }))
+    # S2: never sells — must be skipped entirely.
+    frames.append(pd.DataFrame({
+        "id": "S2", "store_id": "CA_1", "dept_id": "FOODS_2", "d": days,
+        "sales": [0] * len(days),
+    }))
+    # S3: sells, but too short after the train holdout — skipped.
+    frames.append(pd.DataFrame({
+        "id": "S3", "store_id": "TX_1", "dept_id": "FOODS_1", "d": days,
+        "sales": [0] * (len(days) - n - 3) + [1] * (n + 3),
+    }))
+    sales = pd.concat(frames, ignore_index=True)
+
+    train_lines, test_lines = prep_deepar_data.build_jsonl(sales)
+    assert len(train_lines) == len(test_lines) == 1  # only S1 survives
+
+    train, test = json.loads(train_lines[0]), json.loads(test_lines[0])
+    # Trimmed start: day 6 = M5 epoch (2011-01-29, d=1) + 5 days.
+    assert train["start"] == test["start"] == "2011-02-03"
+    # Train drops exactly the trailing window DeepAR will score on test.
+    assert len(test["target"]) == len(train["target"]) + n
+    assert train["target"] == test["target"][:-n]
+    assert all(isinstance(v, int) for v in test["cat"])
+
+
 def test_already_exists_recognises_both_signal_shapes() -> None:
     """Re-running any setup script must be safe, and SageMaker's create APIs
     signal a duplicate as an untyped ValidationException — the message is the
