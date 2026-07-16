@@ -81,5 +81,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Make the standalone aws/ operational scripts importable by their tests.
-pythonpath = ["aws/scripts"]
+# Make the standalone aws/ operational scripts and the SageMaker entry point
+# importable by their tests.
+pythonpath = ["aws/scripts", "aws/sagemaker"]
