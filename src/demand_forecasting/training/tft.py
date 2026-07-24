@@ -25,24 +25,42 @@ from demand_forecasting.training.model import quantile_column
 
 logger = logging.getLogger(__name__)
 
-try:  # pragma: no cover - exercised only where the optional `tft` group is installed
-    from pytorch_lightning.callbacks import Callback as _CallbackBase
-except ImportError:  # keeps this module importable (pure helpers, tests) without darts
-    _CallbackBase = object  # type: ignore[assignment,misc]
 
-
-class _EpochProgress(_CallbackBase):
-    """One log line per epoch — the only signal a long GPU run gives before
+def _epoch_progress_callback() -> Any:
+    """Build (once) and return an instance of a Lightning Callback that logs
+    one line per epoch — the only signal a long GPU run gives before
     completion, since the progress bar and Lightning's own logger are both
-    disabled below (neither plays well with piped/CloudWatch stdout). A
-    silent multi-hour job is a debugging dead end; this print is cheap
-    insurance. Must live at module level (not nested in QuantileTFT.fit): darts
-    pickles the whole model, callbacks included, and a class defined inside a
-    function has an unpicklable `<locals>` qualname.
-    """
+    disabled below (neither plays well with piped/CloudWatch stdout).
 
-    def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
-        logger.info("Epoch %d/%d complete", trainer.current_epoch + 1, trainer.max_epochs)
+    The import stays function-local, like every other torch/darts import in
+    this module: importing `tft.py` must not require the optional `tft`
+    dependency group (`tests/test_tft.py` imports it unconditionally at
+    collection time, and CI never installs that group). A module-level
+    `class _EpochProgress(Callback)` guarded by `try/except ImportError`
+    was tried and reverted — with `ignore_missing_imports = true`, mypy
+    resolves the base class differently depending on whether the package is
+    actually installed, so no single `# type: ignore` placement is correct in
+    both environments (CI failed with "Class cannot subclass ... has type
+    Any" only where pytorch_lightning is absent).
+
+    The class is still built exactly once and registered as a genuine
+    module-level name (`globals()["_EpochProgress"] = ...`) rather than left
+    nested in this function: darts pickles the whole model, callbacks
+    included, and pickle can only resolve a class via `module.ClassName` — a
+    class left nested has an unpicklable `<locals>` qualname.
+    """
+    if "_EpochProgress" not in globals():
+        from pytorch_lightning.callbacks import Callback
+
+        class _EpochProgress(Callback):  # type: ignore[misc]
+            def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+                logger.info(
+                    "Epoch %d/%d complete", trainer.current_epoch + 1, trainer.max_epochs
+                )
+
+        _EpochProgress.__qualname__ = "_EpochProgress"
+        globals()["_EpochProgress"] = _EpochProgress
+    return globals()["_EpochProgress"]()
 
 
 # Identity columns carried into the prediction frame so the panel can roll up.
@@ -194,7 +212,7 @@ class QuantileTFT:
                 "enable_progress_bar": False,
                 "enable_model_summary": False,
                 "logger": False,
-                "callbacks": [_EpochProgress()],
+                "callbacks": [_epoch_progress_callback()],
             },
         )
         self.model.fit(

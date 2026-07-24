@@ -79,6 +79,17 @@ python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 
+# tft.py subclasses pytorch_lightning.Callback (optional `tft` group) inside a
+# function, so mypy resolves the base class to a concrete type when the group
+# is installed (this dev machine) and to Any when it's absent (CI) — with
+# ignore_missing_imports, the same "# type: ignore[misc]" on that class
+# statement is legitimately needed in one environment and unused in the
+# other. warn_unused_ignores is disabled for just this module rather than
+# project-wide so the optional dependency stays genuinely optional.
+[[tool.mypy.overrides]]
+module = "demand_forecasting.training.tft"
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Make the standalone aws/ operational scripts and the SageMaker entry point
