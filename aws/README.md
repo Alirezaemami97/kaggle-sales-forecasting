@@ -45,8 +45,8 @@ You pay for **running** resources, not for "having a project". The whole build i
 | 2 | Glue join + Data Quality + Feature Store | ✅ done |
 | 3 | Train LightGBM as a SageMaker training job | ✅ done |
 | 4 | Evaluation + tuning + DeepAR + Clarify + TFT (GPU) | ✅ done |
-| 5 | Batch Transform → forecasts archive | 🔜 next |
-| 6 | SageMaker Pipeline + EventBridge schedule | ⬜ |
+| 5 | Batch Transform → forecasts archive | ✅ done |
+| 6 | SageMaker Pipeline + EventBridge schedule | 🔜 next |
 | 7 | Model Monitor + CloudWatch + retrain trigger | ⬜ |
 | 8 | Shadow + A/B deployment harness | ⬜ |
 | 9 | CDK (all infra as code) + CodePipeline CI/CD | ⬜ |
@@ -132,3 +132,21 @@ Four independent modeling approaches, evaluated on the same intermittent M5 dema
 **The verdict:** a well-tuned gradient-boosted tree on hand-built lag/rolling features is extremely competitive with — and here marginally ahead of — a managed AutoML pipeline, a purpose-built probabilistic forecaster, and a modern deep architecture, on this intermittent retail-demand data. The case for the deep models has to rest on engineering properties (zero feature engineering, native multi-horizon probabilistic output) rather than raw accuracy — the same honest conclusion the local, CPU-only comparison reached back in M5.
 
 Total phase cost: ≈ **$1.30** across three Processing/built-in jobs, 6 tuning jobs, and 2 GPU jobs (pilot + full). Teardown: no persistent resources; the GPU ECR repository (`demand-forecasting-training-gpu`) is the one non-trivial storage cost (~$1.20/month) to delete when done with the track.
+
+## Phase 5 — run it
+
+Scores the whole catalogue with **Batch Transform** — an ephemeral serving container, no endpoint, cents per run — and writes 28-day quantile forecasts to the prediction archive. This is where the first real inference handler is built: `aws/sagemaker/inference.py` (`model_fn`/`input_fn`/`predict_fn`/`output_fn`), served by the prebuilt SKLearn container with LightGBM added via `requirements.txt` (no image to build).
+
+```bash
+# 1. Build the model-input rows from the Glue features + upload (reads s3://<bucket>/features/):
+python aws/scripts/prep_batch_input.py --bucket <name>
+
+# 2. Score with Batch Transform, then reassemble + archive (point at any trained LightGBM model.tar.gz):
+python aws/scripts/run_batch_transform.py --bucket <name> \
+    --role-arn arn:aws:iam::<account>:role/demand-forecasting-sagemaker-role \
+    --model-data s3://<name>/models/<job>/output/model.tar.gz
+```
+
+The prep step is a deliberate `features → transform` split (Batch Transform is a row-in/row-out scorer, so feature-building stays in the shared, point-in-time-correct pipeline, not the container) — the same decomposition Phase 6's pipeline chains. Forecasts are anchored at the latest fully-observed origin so they can be scored against actuals later; the archive is gated by the same behavioural checks as the local M6 job (non-negative, non-crossing quantiles). Warm series only — the M6 cold-start hierarchy-prior fallback is a pure groupby with no model, deferred as a documented post-merge.
+
+A run over the 3000-series sample writes **84,000 forecasts** (3000 × 28) in ~5 minutes on `ml.m5.large` ≈ a few cents. Teardown: nothing persistent; the SDK auto-creates a `sagemaker-<region>-<account>` staging bucket on first use, safe to leave (empty-ish) or empty later.

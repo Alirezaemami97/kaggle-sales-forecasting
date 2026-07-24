@@ -9,6 +9,7 @@ against the real account, not mocked."""
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import prep_athena_data
 import pytest
@@ -325,6 +326,107 @@ def test_already_exists_recognises_both_signal_shapes() -> None:
     assert not aws_errors.already_exists(
         FakeClientError("ValidationException", "1 validation error detected")
     )
+
+
+def test_inference_columns_match_dataset() -> None:
+    """inference.py hardcodes the feature schema because the 3.9 serving container
+    cannot import the 3.12 package; this pins those lists to the shared dataset
+    module so a column change on one side can't silently skew the other."""
+    import inference
+
+    from demand_forecasting.training import dataset
+
+    assert inference.FEATURE_COLS == dataset.FEATURE_COLS
+    assert inference.CATEGORICAL_COLS == dataset.CATEGORICAL_COLS
+
+
+def test_inference_roundtrip_matches_quantile_lgbm(
+    feature_table: pd.DataFrame, tmp_path: Path
+) -> None:
+    """The self-contained handler must reproduce QuantileLGBM.predict *exactly*,
+    through the headerless-CSV Batch Transform boundary — the zero-skew proof. If
+    the categorical round-trip corrupted an encoding (e.g. a value read back as
+    NaN, or codes reordered), these predictions would diverge."""
+    import inference
+
+    from demand_forecasting.training.dataset import (
+        build_direct_table,
+        select_origins,
+        to_model_frame,
+    )
+    from demand_forecasting.training.model import QuantileLGBM
+
+    # Real M5 stores no-event days as NaN and only genuine events as strings, so
+    # mirror that (the fixture's literal "None" is atypical and a read_csv NA
+    # token) to exercise both the string-category and the missing case honestly.
+    # Use None, not np.nan: np.where(mask, "SuperBowl", np.nan) coerces to a
+    # string array and writes the literal "nan", which is not the missing case.
+    table_src = feature_table.copy()
+    is_event = table_src["d"] % 10 == 0
+    table_src["event_name_1"] = np.where(is_event, "SuperBowl", None)
+    table_src["event_type_1"] = np.where(is_event, "Sporting", None)
+
+    horizon = 7
+    origins = select_origins(table_src, n_origins=2, stride=7, horizon=horizon)
+    table = build_direct_table(table_src, origins, horizon)
+    features = to_model_frame(table)
+
+    quantiles = [0.5, 0.9]
+    params: dict[str, object] = {"n_estimators": 5, "num_leaves": 7, "min_child_samples": 1}
+    model = QuantileLGBM(quantiles, params).fit(features, table["sales"])
+    model.save(tmp_path)
+
+    # Serve path: reload from disk (no QuantileLGBM import) + cross the CSV boundary.
+    served = inference.model_fn(str(tmp_path))
+    parsed = inference.input_fn(features.to_csv(index=False, header=False))
+    served_preds = inference.predict_fn(parsed, served)
+
+    direct_preds = model.predict(features)
+    assert list(served_preds.columns) == list(direct_preds.columns)
+    assert np.allclose(served_preds.to_numpy(), direct_preds.to_numpy())
+
+
+def test_build_batch_inputs_aligns_features_and_meta(feature_table: pd.DataFrame) -> None:
+    """The feature CSV and the meta sidecar must be row-for-row aligned, since the
+    predictions are joined back to identity/horizon by position after the transform."""
+    import prep_batch_input
+
+    from demand_forecasting.training.dataset import FEATURE_COLS
+
+    feature_rows, meta = prep_batch_input.build_batch_inputs(feature_table, horizon=7)
+    assert len(feature_rows) == len(meta)
+    assert list(feature_rows.columns) == FEATURE_COLS
+    assert list(meta.columns) == prep_batch_input.META_COLS
+    # Every row is anchored at the single latest fully-observed origin.
+    origin = int(feature_table["d"].max()) - 7
+    assert (meta["origin"] == origin).all()
+    assert set(meta["horizon"]) == set(range(1, 8))
+    assert (meta["target_day"] == meta["origin"] + meta["horizon"]).all()
+
+
+def test_reassemble_joins_predictions_to_meta_by_position() -> None:
+    import run_batch_transform
+
+    meta = pd.DataFrame({"id": ["A", "A", "B"], "horizon": [1, 2, 1], "target_day": [74, 75, 74]})
+    predictions = pd.DataFrame([[1.0, 3.0], [1.5, 3.5], [2.0, 4.0]])  # headerless, q order
+    archive = run_batch_transform.reassemble(predictions, meta, quantiles=[0.9, 0.5])
+
+    # Quantiles sorted -> q0.5 then q0.9, joined row-for-row onto the meta.
+    assert list(archive.columns) == ["id", "horizon", "target_day", "q0.5", "q0.9"]
+    assert archive["q0.5"].tolist() == [1.0, 1.5, 2.0]
+    assert archive.loc[0, "id"] == "A" and archive.loc[2, "id"] == "B"
+    # A row-count mismatch must fail loudly, never silently misalign the archive.
+    with pytest.raises(ValueError):
+        run_batch_transform.reassemble(predictions.iloc[:2], meta, quantiles=[0.9, 0.5])
+
+
+def test_inference_output_fn_is_headerless_csv() -> None:
+    import inference
+
+    preds = pd.DataFrame({"q0.5": [1.0, 2.0], "q0.9": [3.0, 4.0]})
+    body = inference.output_fn(preds)
+    # No header (Batch Transform reassembles by row position) and one line per row.
+    assert body.splitlines() == ["1.0,3.0", "2.0,4.0"]
 
 
 def test_image_uri_is_a_valid_ecr_reference() -> None:

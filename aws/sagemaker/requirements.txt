@@ -1,0 +1,5 @@
+# Installed by the prebuilt SKLearn inference container at startup. It already
+# ships pandas/numpy/scikit-learn; only LightGBM (to reload the boosters) is
+# missing. Pinned to the same major the model was trained under — the booster
+# text format is stable across 4.x, but keep it explicit.
+lightgbm>=4.3,<5
