@@ -54,11 +54,14 @@ def docker_login(ecr: Any, registry: str) -> None:
     logger.info("Authenticated Docker against %s", registry)
 
 
-def build_and_push(uri: str) -> None:
+def build_and_push(uri: str, dockerfile: str = "Dockerfile") -> None:
     # --platform linux/amd64 is explicit: SageMaker runs amd64, and an image
     # silently built for another arch fails at job start, not at build time.
     subprocess.run(
-        ["docker", "build", "--platform", "linux/amd64", "-t", uri, str(DOCKERFILE_DIR)],
+        [
+            "docker", "build", "--platform", "linux/amd64",
+            "-f", str(DOCKERFILE_DIR / dockerfile), "-t", uri, str(DOCKERFILE_DIR),
+        ],
         check=True,
     )
     subprocess.run(["docker", "push", uri], check=True)
@@ -70,6 +73,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", default="latest")
     parser.add_argument("--repository", default=REPOSITORY)
+    parser.add_argument(
+        "--dockerfile", default="Dockerfile",
+        help="File within aws/docker/, e.g. Dockerfile.gpu for the TFT image",
+    )
     args = parser.parse_args()
 
     import boto3
@@ -82,7 +89,7 @@ def main() -> None:
     uri = image_uri(account, region, args.repository, args.tag)
     ensure_repository(ecr, args.repository)
     docker_login(ecr, uri.split("/")[0])
-    build_and_push(uri)
+    build_and_push(uri, args.dockerfile)
     logger.info("Train with: python aws/scripts/run_sagemaker_training.py --image-uri %s ...", uri)
 
 

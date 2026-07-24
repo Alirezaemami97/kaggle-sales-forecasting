@@ -268,6 +268,36 @@ def test_clarify_frame_binarises_the_label_and_derives_the_facet() -> None:
     assert frame["state_id"].tolist() == ["CA", "CA", "TX", "TX"]
 
 
+def test_tft_settings_bound_the_gpu_spend() -> None:
+    import run_tft_training
+
+    for pilot in (True, False):
+        s = run_tft_training.tft_settings(pilot)
+        # max_run is the cost circuit-breaker; Spot requires max_wait >= max_run.
+        assert s["max_wait"] >= s["max_run"]
+        assert s["max_run"] <= 2 * 3600  # never more than 2h of GPU
+        # Total windows must stay bounded regardless of history length or
+        # series count — the exact blowup that starved the first GPU attempt
+        # (1000 series x unbounded history = 647,000 samples, zero epochs done).
+        assert s["max_samples_per_ts"] * s["max_series"] <= 100_000
+        assert 0 < s["loader_workers"] <= 4  # ml.g4dn.xlarge has 4 vCPUs
+    assert run_tft_training.tft_settings(True)["epochs"] == 1
+
+
+def test_tft_config_overrides_are_validated() -> None:
+    import tft_entry
+
+    config = load_config("config/config.yaml")
+    cfg = tft_entry.tft_config_with_overrides(config, max_series=1000, n_epochs=15)
+    assert cfg.max_series == 1000
+    assert cfg.n_epochs == 15
+    # Untouched knobs fall through from config.yaml.
+    assert cfg.input_chunk_length == config.training.tft.input_chunk_length  # type: ignore[union-attr]
+    # Overrides are validated — an invalid draw dies before GPU time is billed.
+    with pytest.raises(ValidationError):
+        tft_entry.tft_config_with_overrides(config, max_series=None, n_epochs=0)
+
+
 def test_already_exists_recognises_both_signal_shapes() -> None:
     """Re-running any setup script must be safe, and SageMaker's create APIs
     signal a duplicate as an untyped ValidationException — the message is the

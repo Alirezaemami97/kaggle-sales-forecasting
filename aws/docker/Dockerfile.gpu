@@ -1,0 +1,41 @@
+# GPU training image for the TFT comparison (SageMaker BYOC, sub-phase 4e).
+#
+# Base = the official PyTorch CUDA runtime shipping torch 2.5.1 — the exact
+# version pinned locally (torch >=2.2,<2.6) — with CUDA 12.4 wired. It is a
+# Python 3.11 image; our code needs >=3.10 (PEP 604 unions), so unlike the
+# SKLearn-3.9 incident this base can host the package unchanged, and
+# rebuilding CUDA torch on top of python:3.12-slim would add gigabytes of
+# pip download for zero benefit.
+#
+# Same script-mode contract as the CPU image: sagemaker-training provides the
+# `train` entrypoint, code arrives per-job via sourcedir.tar.gz.
+#
+# Size warning: ~12GB built (the CUDA base plus darts' heavy dependency tree —
+# xgboost, shap, statsforecast etc., unused by our TFT path but kept so the
+# image matches the local environment). ECR ~$0.10/GB/month => ~$1.20/month
+# while it exists — delete the repository at teardown (noted in aws/PROGRESS.md).
+# A production image would install a trimmed darts instead; portfolio parity won.
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+# build-essential: sagemaker-training ships as an sdist with a small C
+# extension (gethostname) — pip needs gcc to build it. libgomp1: LightGBM's
+# OpenMP runtime (present in some torch bases, cheap to make explicit).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# torch is already in the base; darts must accept it rather than re-pull it.
+# numpy stays <2 (the same darts/numba constraint hit locally at M5).
+RUN pip install --no-cache-dir \
+    "sagemaker-training>=4.7" \
+    "darts>=0.30,<0.31" \
+    "lightgbm>=4.3,<5" \
+    "pandas>=2.2,<3" \
+    "numpy>=1.26,<2" \
+    "pyarrow>=15,<21" \
+    "pydantic>=2.6,<3" \
+    "pyyaml>=6,<7" \
+    "tabulate>=0.9,<1"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
