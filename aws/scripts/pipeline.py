@@ -57,7 +57,8 @@ def get_pipeline(
     from sagemaker.processing import ProcessingInput, ProcessingOutput, Processor
     from sagemaker.workflow.condition_step import ConditionStep
     from sagemaker.workflow.conditions import ConditionLessThanOrEqualTo
-    from sagemaker.workflow.functions import JsonGet
+    from sagemaker.workflow.execution_variables import ExecutionVariables
+    from sagemaker.workflow.functions import Join, JsonGet
     from sagemaker.workflow.model_step import ModelStep
     from sagemaker.workflow.parameters import ParameterFloat, ParameterInteger, ParameterString
     from sagemaker.workflow.pipeline import Pipeline
@@ -75,7 +76,12 @@ def get_pipeline(
     eval_instance = ParameterString(name="EvalInstanceType", default_value="ml.m5.xlarge")
 
     features_uri = f"s3://{bucket}/features/"
-    eval_output_uri = f"s3://{bucket}/{EVAL_OUTPUT_URI_SUFFIX}/"
+    # Execution-scoped so each registered version pins its OWN metrics: Phase 8's
+    # promote-if-beats reads these back, and a shared path would make every version
+    # resolve to the latest eval, not its own snapshot.
+    eval_base = f"s3://{bucket}/{EVAL_OUTPUT_URI_SUFFIX}"
+    eval_output_uri = Join(on="/", values=[eval_base, ExecutionVariables.PIPELINE_EXECUTION_ID])
+    eval_metrics_uri = Join(on="/", values=[eval_output_uri, "evaluation.json"])
 
     # 1. Train — produces the deployable artifact (same Estimator as the launcher).
     estimator = build_estimator(
@@ -133,9 +139,7 @@ def get_pipeline(
         sagemaker_session=session,
     )
     model_metrics = ModelMetrics(
-        model_statistics=MetricsSource(
-            s3_uri=f"{eval_output_uri}evaluation.json", content_type="application/json"
-        )
+        model_statistics=MetricsSource(s3_uri=eval_metrics_uri, content_type="application/json")
     )
     register_step = ModelStep(
         name="Register",

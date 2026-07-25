@@ -457,6 +457,35 @@ def test_pipeline_module_wires_the_shared_pieces() -> None:
     assert callable(pipeline.get_pipeline)
 
 
+def test_promote_decision_gates_on_beating_the_incumbent() -> None:
+    import run_deployment
+
+    # No incumbent yet -> bootstrap the first production.
+    assert run_deployment.promote_decision(None, 0.70) is True
+    # Candidate at least as good (lower WAPE) -> promote; worse -> hold.
+    assert run_deployment.promote_decision(0.70, 0.68) is True
+    assert run_deployment.promote_decision(0.70, 0.70) is True
+    assert run_deployment.promote_decision(0.70, 0.72) is False
+    # A candidate with no metric can't be verified -> never auto-promote.
+    assert run_deployment.promote_decision(0.70, None) is False
+
+
+def test_latest_with_status_picks_the_newest_matching_version() -> None:
+    import registry
+
+    # list_versions returns newest-first; pick the first with the wanted status.
+    versions = [
+        {"ModelPackageVersion": 3, "ModelApprovalStatus": "PendingManualApproval"},
+        {"ModelPackageVersion": 2, "ModelApprovalStatus": "Approved"},
+        {"ModelPackageVersion": 1, "ModelApprovalStatus": "Approved"},
+    ]
+    pending = registry.latest_with_status(versions, "PendingManualApproval")
+    assert pending is not None and pending["ModelPackageVersion"] == 3
+    approved = registry.latest_with_status(versions, "Approved")
+    assert approved is not None and approved["ModelPackageVersion"] == 2
+    assert registry.latest_with_status(versions, "Rejected") is None
+
+
 def test_monitor_summarize_reports_wape_and_psi(feature_table: pd.DataFrame) -> None:
     """The monitor's headline metrics (the numbers the CloudWatch alarm gates on)
     must compute from the archive + actuals: forecast WAPE and worst-feature PSI."""

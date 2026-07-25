@@ -48,8 +48,8 @@ You pay for **running** resources, not for "having a project". The whole build i
 | 5 | Batch Transform → forecasts archive | ✅ done |
 | 6 | SageMaker Pipeline + EventBridge schedule | ✅ done |
 | 7 | Monitoring + CloudWatch + retrain trigger | ✅ done |
-| 8 | Shadow + A/B deployment harness | 🔜 next |
-| 9 | CDK (all infra as code) + CodePipeline CI/CD | ⬜ |
+| 8 | Shadow + A/B deployment harness | ✅ done |
+| 9 | CDK (all infra as code) + CodePipeline CI/CD | 🔜 next |
 
 ## Phase 1 — run it
 
@@ -178,3 +178,15 @@ python aws/scripts/run_monitoring.py --bucket <name> --role-arn <role> --create-
 ```
 
 The monitor is a Processing job reusing the **portable** `feature_drift` (PSI) and `score_forecasts` code — same signals as the local system, no skew — rather than managed Model Monitor, which is endpoint-oriented and doesn't compute these custom forecasting metrics. The retrain rule is created **disabled** so a breach can't kick off runaway retraining until deliberately enabled. A run is one ~4-minute `ml.m5.xlarge` job + pennies of CloudWatch ≈ a couple of cents. On the reference data the alarm sits `OK` (WAPE ≈ 0.66 < 0.75 threshold) — the healthy case. Teardown: delete the alarm and the (disabled) rule.
+
+## Phase 8 — run it
+
+Safe rollout via the Model Registry. There are no named stages: a version's `ModelApprovalStatus` (`PendingManualApproval` → `Approved`/`Rejected`) is the mechanism, "latest Approved = production" is the convention, and a batch job reads latest-Approved at run time — so **rollback is one API call, no redeploy**.
+
+```bash
+python aws/scripts/run_deployment.py --compare    # incumbent vs candidate + decision
+python aws/scripts/run_deployment.py --promote    # Approve the candidate if it beats the incumbent
+python aws/scripts/run_deployment.py --rollback   # Reject the current top; the prior Approved is production again
+```
+
+The default path is cheap (registry API only, no compute): read each version's backtest WAPE from its `ModelMetrics` (pinned per version by the pipeline's execution-scoped eval output) and promote the candidate only if it wins. **Shadow** (candidate scores the full catalogue alongside the incumbent) and **A/B** (deterministic hash split of the catalogue) are the Batch Transform comparisons for a batch system — no live traffic splitting; blue/green and canary are the endpoint-world equivalents. Promoting the first version bootstraps production; `--force` overrides the gate.
