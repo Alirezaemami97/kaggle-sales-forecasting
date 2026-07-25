@@ -2,7 +2,12 @@
 
 A production-style demand-forecasting system on the [M5 (Walmart) dataset](https://www.kaggle.com/competitions/m5-forecasting-accuracy): 28-day-ahead daily quantile forecasts for 30,490 item-store series, built as packaged, tested, containerised Python — not a notebook. The forecasting model is deliberately bounded; the engineering around it is the point: honest hierarchical evaluation, batch inference, automated retraining, a shadow → A/B deployment harness, and infrastructure as code.
 
-**Status: Milestone 6 complete — MVP done.** One command trains either model and backtests it honestly; a batch job writes monitored 28-day quantile forecasts for the whole catalogue to a prediction archive, with cold-start fallback and drift + forecast-error monitoring.
+**The system is built twice.** A **portable core** (`src/`, cloud-agnostic — LightGBM/TFT, the point-in-time feature pipeline, the evaluation panel) is orchestrated two ways that share the modelling and feature code unchanged:
+
+- **Local MVP** — one command trains either model and backtests it honestly; a batch job writes monitored 28-day quantile forecasts for the whole catalogue to a prediction archive, with cold-start fallback and drift + forecast-error monitoring.
+- **AWS-native platform** — the same code run on SageMaker as the full operations layer: Glue features, script-mode/BYOC training, Batch Transform, a continuous-training **Pipeline** with a WAPE promote-gate, CloudWatch monitoring wired to a retrain trigger, registry-based promote/rollback, and **CDK** infrastructure. See **[`aws/README.md`](aws/README.md)** — the whole track (Phases 0–9) is verified in a real account for ≈ $3.50.
+
+**Status: complete** — portable MVP + AWS-native platform track both done and verified.
 
 ## Problem framing
 
@@ -37,11 +42,11 @@ Forecast error is asymmetric in business terms: **under-forecasting** causes sto
 | 4. Evaluation panel | WAPE/MASE/WRMSSE × hierarchy level × horizon; pinball loss + calibration report | ✅ done |
 | 5. TFT upgrade | Darts TFT with native multi-horizon quantiles; honest comparison incl. retraining cost | ✅ done |
 | 6. Batch inference + monitoring | Scheduled forecast job → prediction archive; data-drift + forecast-error monitoring; cold-start fallback | ✅ done |
-| 7. Continuous Training | Scheduled + trigger-based automated retraining wired to the monitoring signal | — |
-| 8. Deployment harness | Shadow → A/B → promote → rollback on registry stages | — |
-| 9. Infrastructure as code | Storage, scheduler, and registry backend defined in Terraform | — |
+| 7. Continuous Training | Scheduled + trigger-based automated retraining wired to the monitoring signal | ✅ AWS track |
+| 8. Deployment harness | Shadow → A/B → promote → rollback on registry stages | ✅ AWS track |
+| 9. Infrastructure as code | Storage, scheduler, registry, alarms defined as code | ✅ AWS track |
 
-Phases 1–6 are the MVP: train either model with one command, backtest it honestly, and produce monitored 28-day quantile forecasts for the whole catalogue. Phases 7–9 are the platform layer.
+Phases 1–6 are the portable MVP: train either model with one command, backtest it honestly, and produce monitored 28-day quantile forecasts for the whole catalogue. **The platform layer (7–9) was delivered on the AWS-native track** rather than as a second local implementation — continuous training as a SageMaker Pipeline + EventBridge, shadow/A-B via the Model Registry, and infrastructure as **AWS CDK** (the portable-Terraform variant is a documented stretch). Everything AWS is in **[`aws/README.md`](aws/README.md)**.
 
 ### LightGBM vs TFT — the honest comparison (phase 5)
 
@@ -56,6 +61,25 @@ Both models were trained and backtested on the **same** California slice (120 se
 | retrain time (3 folds) | **24 s** | 1550 s (~26 min) | — | — |
 
 The TFT is modestly better at aggregate levels but **ties LightGBM at the item-store level — where replenishment orders are actually placed — for ~64× the retraining cost** and a heavier (torch-runtime) deployment. **The baseline stays the production model.** The transformer's edge may widen with a GPU, full history, and tuning (the AWS track); on this bounded, CPU-only evidence it does not earn its operational cost. Recommending the simpler model, with numbers behind it, is the intended outcome. This run is deliberately bounded (CA slice, 120 series, most-recent 2 years, small network, 5 epochs); full-scale TFT is deferred to the GPU track.
+
+## AWS-native track
+
+The same portable code, rebuilt as a managed platform on AWS and aligned to the **AWS ML Engineer – Associate (MLA-C01)** certification. The bridge is SageMaker **script mode** — AWS runs *our* training and feature code unchanged; only the orchestration moves to managed services. Full detail, run commands, and per-phase teardown are in **[`aws/README.md`](aws/README.md)**.
+
+| Component | AWS service |
+|---|---|
+| Data lake · SQL exploration | S3 (Parquet) · Athena |
+| Feature pipeline + data quality | Glue (PySpark) + Glue Data Quality · Feature Store (offline) |
+| Training (LightGBM/TFT) | SageMaker training jobs — script mode + BYOC (CPU & GPU-Spot) |
+| Tuning · built-in · bias | Automatic Model Tuning · DeepAR · Clarify |
+| Experiments + versioning | SageMaker Experiments + Model Registry |
+| Batch forecasting | SageMaker Batch Transform → prediction archive |
+| Orchestration + CT | SageMaker Pipelines (WAPE promote-gate) + EventBridge (schedule + retrain trigger) |
+| Monitoring | Processing job → CloudWatch custom metrics + alarms |
+| Deployment | Registry approval status: shadow / A-B / promote / rollback |
+| Infrastructure as code + CI/CD | AWS CDK (synth) + CodePipeline / CodeBuild |
+
+**Four models compared on the same intermittent-demand data** (item-store WAPE): AMT-tuned LightGBM **0.6747** · DeepAR 0.6816 · baseline LightGBM 0.6963 · GPU-trained TFT 0.7011 — near-parity, the well-tuned tree ahead. The whole track (Phases 0–9) is verified in a real account for **≈ $3.50** with ephemeral compute only.
 
 ## Quickstart
 
@@ -101,18 +125,25 @@ poetry run ruff check src/ tests/ && poetry run mypy src/ && poetry run pytest
 
 ```
 ├── config/config.yaml         # all run parameters in one place
-├── src/demand_forecasting/
+├── src/demand_forecasting/     # PORTABLE CORE (cloud-agnostic, shared by both tracks)
 │   ├── data/                  # loading + schema validation + Parquet conversion
 │   ├── features/              # point-in-time feature pipeline (shared)      [phase 2]
 │   ├── training/              # LightGBM + TFT + MLflow                      [phases 3, 5]
 │   ├── evaluation/            # metric panel + rolling-origin backtest       [phases 3, 4]
 │   ├── inference/             # batch forecast job → prediction archive      [phase 6]
-│   ├── monitoring/            # drift + forecast-error checks                [phase 6]
-│   └── platform/              # retraining trigger + deployment harness      [phases 7, 8]
-├── infra/terraform/           # infrastructure as code                       [phase 9]
-├── tests/                     # unit + data + no-leakage tests (synthetic fixtures)
+│   └── monitoring/            # drift + forecast-error checks                [phase 6]
+├── aws/                        # AWS-NATIVE TRACK (see aws/README.md)         [phases 0–8]
+│   ├── scripts/               # boto3/SDK launchers (run locally, submit to AWS)
+│   ├── sagemaker/             # container entry points (training, eval, serve, monitor)
+│   ├── glue/ · athena/ · docker/
+│   └── README.md · PROGRESS.md
+├── infra/cdk/                  # infrastructure as code — AWS CDK (synth-only) [phase 9]
+├── buildspec.yml               # CI gate as a CodeBuild spec                  [phase 9]
+├── tests/                     # unit + data + no-leakage + aws tests (synthetic fixtures)
 └── notebooks/                 # EDA only, clearly separated
 ```
+
+*(The platform tier lives in `aws/` rather than a local `src/…/platform/`: continuous training, deployment harness, and IaC were built cloud-natively — see the phase table above.)*
 
 ## Non-goals
 
@@ -120,4 +151,6 @@ Not chasing the M5 leaderboard; not heavy data cleaning; not ensembles or model 
 
 ## Stack
 
-Python 3.12 · Poetry · LightGBM · Darts + PyTorch (TFT) · pydantic · MLflow · Evidently · pytest / ruff / mypy · Docker · GitHub Actions · Terraform
+**Core:** Python 3.12 · Poetry · LightGBM · Darts + PyTorch (TFT) · pydantic · MLflow · Evidently · pytest / ruff / mypy · Docker · GitHub Actions
+
+**AWS track:** S3 · Athena · Glue (+ Data Quality) · SageMaker (Training, Processing, Experiments, Model Registry, Batch Transform, Automatic Model Tuning, DeepAR, Clarify, Pipelines, Feature Store) · ECR · CloudWatch · EventBridge · AWS CDK · CodePipeline / CodeBuild
