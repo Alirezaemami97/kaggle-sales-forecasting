@@ -46,8 +46,8 @@ You pay for **running** resources, not for "having a project". The whole build i
 | 3 | Train LightGBM as a SageMaker training job | ✅ done |
 | 4 | Evaluation + tuning + DeepAR + Clarify + TFT (GPU) | ✅ done |
 | 5 | Batch Transform → forecasts archive | ✅ done |
-| 6 | SageMaker Pipeline + EventBridge schedule | 🔜 next |
-| 7 | Model Monitor + CloudWatch + retrain trigger | ⬜ |
+| 6 | SageMaker Pipeline + EventBridge schedule | ✅ done |
+| 7 | Model Monitor + CloudWatch + retrain trigger | 🔜 next |
 | 8 | Shadow + A/B deployment harness | ⬜ |
 | 9 | CDK (all infra as code) + CodePipeline CI/CD | ⬜ |
 
@@ -150,3 +150,20 @@ python aws/scripts/run_batch_transform.py --bucket <name> \
 The prep step is a deliberate `features → transform` split (Batch Transform is a row-in/row-out scorer, so feature-building stays in the shared, point-in-time-correct pipeline, not the container) — the same decomposition Phase 6's pipeline chains. Forecasts are anchored at the latest fully-observed origin so they can be scored against actuals later; the archive is gated by the same behavioural checks as the local M6 job (non-negative, non-crossing quantiles). Warm series only — the M6 cold-start hierarchy-prior fallback is a pure groupby with no model, deferred as a documented post-merge.
 
 A run over the 3000-series sample writes **84,000 forecasts** (3000 × 28) in ~5 minutes on `ml.m5.large` ≈ a few cents. Teardown: nothing persistent; the SDK auto-creates a `sagemaker-<region>-<account>` staging bucket on first use, safe to leave (empty-ish) or empty later.
+
+## Phase 6 — run it
+
+The continuous-training loop as a **SageMaker Pipeline** — one DAG defined in Python, compiled to JSON, and executed by SageMaker (not your laptop, so it survives a sleeping machine). `Train` and `Evaluate` run, a **ConditionStep** reads the backtest WAPE from a `PropertyFile`, and a new model version is **registered only if it clears the bar** — a model is promoted because it earned it, never because it finished training. An **EventBridge** rule (created disabled) is the scheduled trigger.
+
+```bash
+# 1. Register/update the pipeline definition (stages code, no execution — near-free):
+python aws/scripts/run_pipeline.py --bucket <name> --role-arn <role>
+
+# 2. Run it once (Train + Evaluate → CheckWAPE → Register if WAPE ≤ threshold):
+python aws/scripts/run_pipeline.py --bucket <name> --role-arn <role> --execute
+
+# 3. (optional) Create the DISABLED weekly schedule:
+python aws/scripts/run_pipeline.py --bucket <name> --role-arn <role> --schedule
+```
+
+The steps reuse the exact pieces the standalone launchers built (`build_estimator`, the Phase-4a eval Processor, the Phase-3 register image/group), so a scheduled run and a hand-run can't drift. `evaluate_entry` runs a rolling-origin **backtest**, so the gate measures how the *configuration* generalises; the `TrainingStep` produces the deployable artifact (same config, all origins) — "backtest to decide, train-on-all to deploy". An execution is ~2 ephemeral jobs ≈ a couple of cents; Pipelines and EventBridge are free, and the schedule is created **disabled** so it never fires until deliberately enabled (`aws events enable-rule …`), then disabled again — teardown discipline in code. The schedule needs a role that trusts `events.amazonaws.com` with `sagemaker:StartPipelineExecution`.

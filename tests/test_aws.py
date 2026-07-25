@@ -8,6 +8,7 @@ against the real account, not mocked."""
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -211,6 +212,14 @@ def test_evaluate_entry_writes_the_panel(feature_table: pd.DataFrame, tmp_path: 
 
     for name in ["by_level.csv", "by_horizon.csv", "calibration.csv", "panel.md"]:
         assert (out / name).exists(), f"missing panel artifact: {name}"
+
+    # The pipeline's ConditionStep gates on this JSON via PropertyFile + JsonGet,
+    # so its presence and shape are part of the contract, not just a log line.
+    import json
+
+    headline = json.loads((tmp_path / "panel" / "evaluation.json").read_text(encoding="utf-8"))
+    assert set(headline) == {"wape_item_store", "wape_total", "wrmsse"}
+    assert headline["wape_item_store"] >= 0.0
 
 
 def test_deepar_jsonl_trims_zeros_and_splits_train_test() -> None:
@@ -427,6 +436,49 @@ def test_inference_output_fn_is_headerless_csv() -> None:
     body = inference.output_fn(preds)
     # No header (Batch Transform reassembles by row position) and one line per row.
     assert body.splitlines() == ["1.0,3.0", "2.0,4.0"]
+
+
+def test_pipeline_module_wires_the_shared_pieces() -> None:
+    """CI-safe smoke: `pipeline.py` imports cleanly and reuses the shared
+    constants from the sibling launchers (so the DAG can't drift from the
+    hand-run pieces). The full definition is validated by `run_pipeline --upsert`
+    against the account — building it offline hangs the SDK, and upsert is nearly
+    free, so that is the right layer for it."""
+    import pipeline
+    import register_model
+    import run_evaluation
+
+    assert pipeline.PIPELINE_NAME == "demand-forecasting-ct"
+    assert 0.0 < pipeline.DEFAULT_WAPE_THRESHOLD < 1.0
+    # The gate registers under the same group the hand-run register_model uses.
+    assert pipeline.MODEL_PACKAGE_GROUP == register_model.MODEL_PACKAGE_GROUP
+    # The eval step mounts code at the same path run_evaluation set the PYTHONPATH to.
+    assert pipeline.CODE_MOUNT == run_evaluation.CODE_MOUNT
+    assert callable(pipeline.get_pipeline)
+
+
+def test_create_schedule_is_disabled_and_targets_the_pipeline() -> None:
+    """The weekly rule must be created DISABLED (a live schedule bills forever)
+    and wired to the pipeline ARN with the given role. Injected fake client — no
+    AWS, CI-safe."""
+    import run_pipeline
+
+    calls: dict[str, Any] = {}
+
+    class FakeEvents:
+        def put_rule(self, **kw: Any) -> None:
+            calls["rule"] = kw
+
+        def put_targets(self, **kw: Any) -> None:
+            calls["targets"] = kw
+
+    run_pipeline.create_schedule(
+        FakeEvents(), "demand-forecasting-ct-weekly", "rate(7 days)", "arn:pipe", "arn:role"
+    )
+    assert calls["rule"]["State"] == "DISABLED"
+    assert calls["rule"]["ScheduleExpression"] == "rate(7 days)"
+    target = calls["targets"]["Targets"][0]
+    assert target["Arn"] == "arn:pipe" and target["RoleArn"] == "arn:role"
 
 
 def test_image_uri_is_a_valid_ecr_reference() -> None:

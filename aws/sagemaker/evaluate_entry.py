@@ -20,6 +20,7 @@ evaluation should produce anyway. Headline numbers are logged for the console.
 """
 
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -56,11 +57,17 @@ def evaluate(config: Config, features_dir: Path, output_dir: Path) -> Path:
     panel_dir = save_panel(panel, output_dir)
 
     by_lvl = panel["by_level"].set_index("level")
+    headline = {
+        "wape_item_store": float(by_lvl.loc["item_store", "wape"]),
+        "wape_total": float(by_lvl.loc["total", "wape"]),
+        "wrmsse": float(panel["by_level"]["rmsse"].mean()),
+    }
+    # A flat JSON the pipeline's ConditionStep reads via PropertyFile + JsonGet:
+    # a printed log line can't gate a DAG, only a file a downstream step queries.
+    (Path(output_dir) / "evaluation.json").write_text(json.dumps(headline), encoding="utf-8")
     logger.info(
-        "Panel headline: wape_item_store=%.4f wape_total=%.4f wrmsse=%.4f",
-        float(by_lvl.loc["item_store", "wape"]),
-        float(by_lvl.loc["total", "wape"]),
-        float(panel["by_level"]["rmsse"].mean()),
+        "Panel headline: wape_item_store=%(wape_item_store).4f "
+        "wape_total=%(wape_total).4f wrmsse=%(wrmsse).4f", headline
     )
     logger.info("Panel written to %s", panel_dir)
     return panel_dir
