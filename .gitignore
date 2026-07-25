@@ -31,6 +31,7 @@ infra/terraform/.terraform/
 # Local-only docs — not part of the public repo
 docs/learning/
 DESIGN.md
+DESIGN.pdf
 AWS_DEPLOYMENT.md
 AWS_DEPLOYMENT.pdf
 CLAUDE.md
