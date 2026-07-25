@@ -47,8 +47,8 @@ You pay for **running** resources, not for "having a project". The whole build i
 | 4 | Evaluation + tuning + DeepAR + Clarify + TFT (GPU) | ✅ done |
 | 5 | Batch Transform → forecasts archive | ✅ done |
 | 6 | SageMaker Pipeline + EventBridge schedule | ✅ done |
-| 7 | Model Monitor + CloudWatch + retrain trigger | 🔜 next |
-| 8 | Shadow + A/B deployment harness | ⬜ |
+| 7 | Monitoring + CloudWatch + retrain trigger | ✅ done |
+| 8 | Shadow + A/B deployment harness | 🔜 next |
 | 9 | CDK (all infra as code) + CodePipeline CI/CD | ⬜ |
 
 ## Phase 1 — run it
@@ -167,3 +167,14 @@ python aws/scripts/run_pipeline.py --bucket <name> --role-arn <role> --schedule
 ```
 
 The steps reuse the exact pieces the standalone launchers built (`build_estimator`, the Phase-4a eval Processor, the Phase-3 register image/group), so a scheduled run and a hand-run can't drift. `evaluate_entry` runs a rolling-origin **backtest**, so the gate measures how the *configuration* generalises; the `TrainingStep` produces the deployable artifact (same config, all origins) — "backtest to decide, train-on-all to deploy". An execution is ~2 ephemeral jobs ≈ a couple of cents; Pipelines and EventBridge are free, and the schedule is created **disabled** so it never fires until deliberately enabled (`aws events enable-rule …`), then disabled again — teardown discipline in code. The schedule needs a role that trusts `events.amazonaws.com` with `sagemaker:StartPipelineExecution`.
+
+## Phase 7 — run it
+
+Closes the loop: a monitoring job computes forecast error + input drift on the latest batch archive, publishes **CloudWatch custom metrics**, and a **CloudWatch alarm** on a threshold fires an **EventBridge** rule that re-invokes the Phase-6 pipeline — trigger-based continuous training, the complement to Phase 6's schedule.
+
+```bash
+# Monitor the latest archive, publish metrics, create the alarm + DISABLED retrain rule:
+python aws/scripts/run_monitoring.py --bucket <name> --role-arn <role> --create-alarm --wire-retrain
+```
+
+The monitor is a Processing job reusing the **portable** `feature_drift` (PSI) and `score_forecasts` code — same signals as the local system, no skew — rather than managed Model Monitor, which is endpoint-oriented and doesn't compute these custom forecasting metrics. The retrain rule is created **disabled** so a breach can't kick off runaway retraining until deliberately enabled. A run is one ~4-minute `ml.m5.xlarge` job + pennies of CloudWatch ≈ a couple of cents. On the reference data the alarm sits `OK` (WAPE ≈ 0.66 < 0.75 threshold) — the healthy case. Teardown: delete the alarm and the (disabled) rule.

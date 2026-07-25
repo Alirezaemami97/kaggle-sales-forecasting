@@ -457,6 +457,47 @@ def test_pipeline_module_wires_the_shared_pieces() -> None:
     assert callable(pipeline.get_pipeline)
 
 
+def test_monitor_summarize_reports_wape_and_psi(feature_table: pd.DataFrame) -> None:
+    """The monitor's headline metrics (the numbers the CloudWatch alarm gates on)
+    must compute from the archive + actuals: forecast WAPE and worst-feature PSI."""
+    import monitor_entry
+
+    from demand_forecasting.training.model import quantile_column
+
+    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+    # A tiny archive: forecasts for the observed tail days, a flat median forecast.
+    archive = (
+        feature_table[feature_table["d"] >= 74][["id", "d"]]
+        .rename(columns={"d": "target_day"})
+        .assign(origin=73, horizon=1)
+    )
+    for q, val in zip(quantiles, [0.0, 1.0, 2.0, 3.0, 4.0]):
+        archive[quantile_column(q)] = val
+
+    summary = monitor_entry.summarize(archive, feature_table, quantiles)
+    assert set(summary) == {"forecast_wape", "max_psi", "n_drifted", "n_scored", "n_series"}
+    assert summary["n_scored"] == len(archive)  # every forecast day is observed here
+    assert summary["forecast_wape"] >= 0.0
+    assert summary["max_psi"] >= 0.0
+
+
+def test_monitoring_metric_data_and_retrain_pattern() -> None:
+    """The CloudWatch payload and the retrain event pattern are what connect the
+    monitor to the alarm to the pipeline; pin their shapes so the wiring holds."""
+    import run_monitoring
+
+    summary = {"forecast_wape": 0.7, "max_psi": 0.12, "n_drifted": 1, "n_scored": 100}
+    data = run_monitoring.metric_data(summary)
+    assert {m["MetricName"] for m in data} == {"ForecastWAPE", "MaxPSI", "DriftedFeatures"}
+    assert next(m for m in data if m["MetricName"] == "ForecastWAPE")["Value"] == 0.7
+
+    pattern = run_monitoring.retrain_event_pattern("my-alarm")
+    assert pattern["source"] == ["aws.cloudwatch"]
+    assert pattern["detail"]["alarmName"] == ["my-alarm"]
+    # Only a breach (ALARM), never a recovery (OK), triggers a retrain.
+    assert pattern["detail"]["state"]["value"] == ["ALARM"]
+
+
 def test_create_schedule_is_disabled_and_targets_the_pipeline() -> None:
     """The weekly rule must be created DISABLED (a live schedule bills forever)
     and wired to the pipeline ARN with the given role. Injected fake client — no
