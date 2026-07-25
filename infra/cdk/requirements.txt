@@ -1,0 +1,5 @@
+# CDK Python deps live here, in the CDK project's own venv — NOT in the project's
+# Poetry env (aws-cdk-lib is heavy and only needed for IaC synth). Standard CDK
+# layout: python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+aws-cdk-lib>=2.160,<3
+constructs>=10.0.0,<11

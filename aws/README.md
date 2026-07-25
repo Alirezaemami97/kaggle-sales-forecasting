@@ -49,7 +49,7 @@ You pay for **running** resources, not for "having a project". The whole build i
 | 6 | SageMaker Pipeline + EventBridge schedule | ✅ done |
 | 7 | Monitoring + CloudWatch + retrain trigger | ✅ done |
 | 8 | Shadow + A/B deployment harness | ✅ done |
-| 9 | CDK (all infra as code) + CodePipeline CI/CD | 🔜 next |
+| 9 | CDK (all infra as code) + CodePipeline CI/CD | ✅ done |
 
 ## Phase 1 — run it
 
@@ -190,3 +190,16 @@ python aws/scripts/run_deployment.py --rollback   # Reject the current top; the 
 ```
 
 The default path is cheap (registry API only, no compute): read each version's backtest WAPE from its `ModelMetrics` (pinned per version by the pipeline's execution-scoped eval output) and promote the candidate only if it wins. **Shadow** (candidate scores the full catalogue alongside the incumbent) and **A/B** (deterministic hash split of the catalogue) are the Batch Transform comparisons for a batch system — no live traffic splitting; blue/green and canary are the endpoint-world equivalents. Promoting the first version bootstraps production; `--force` overrides the gate.
+
+## Phase 9 — run it
+
+The durable infrastructure re-expressed as an **AWS CDK** app (`infra/cdk/`), plus **CodePipeline + CodeBuild** running the same ruff/mypy/pytest gate. **Synth-only** — the hand-built resources already run, so this is the reviewed, reproducible-from-code proof (the CDK analogue of `terraform plan`), not a deploy.
+
+```bash
+npm install -g aws-cdk
+cd infra/cdk
+python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # (Windows path)
+cdk synth                                                                # local, free — no AWS
+```
+
+`infra/cdk/demand_forecasting_cdk/infra_stack.py` codifies the S3 data-lake bucket, the SageMaker/Glue roles, the two training ECR repos, the ForecastWAPE alarm, and the disabled schedule + retrain EventBridge rules (including the `events.amazonaws.com`→pipeline role the boto3 launchers couldn't self-grant). `pipeline_stack.py` defines the CodePipeline; `buildspec.yml` (repo root) is the gate as code. The **SageMaker Pipeline itself stays SDK-defined** (`pipeline.py`) rather than duplicated as a `CfnPipeline`. Nothing is deployed (`cdk deploy` would conflict with the working resources and spend); `cdk destroy` is the one-command teardown, and the bucket/ECR are `RETAIN`. End state: the same system expressed as **portable Terraform (stretch, local track) and AWS-native CDK** — two IaC implementations.

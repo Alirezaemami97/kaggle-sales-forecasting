@@ -1,0 +1,19 @@
+# CodeBuild spec — the same ruff/mypy/pytest gate GitHub Actions runs, so the
+# checks are identical whether CI is GitHub-native or AWS-native (CodePipeline →
+# CodeBuild). Installs only the main + dev deps, exactly like CI: the optional
+# groups (tft/monitoring/aws) stay out, which is what keeps the lazy-import
+# discipline honest.
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: "3.12"
+    commands:
+      - pip install poetry
+      - poetry install --no-root
+  build:
+    commands:
+      - poetry run ruff check src/ tests/ aws/
+      - poetry run mypy src/
+      - poetry run pytest -q

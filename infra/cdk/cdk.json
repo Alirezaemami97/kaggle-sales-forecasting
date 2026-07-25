@@ -1,0 +1,14 @@
+{
+  "app": "python app.py",
+  "watch": {
+    "include": ["**"],
+    "exclude": ["README.md", "cdk*.json", "requirements*.txt", "**/__pycache__"]
+  },
+  "context": {
+    "bucket_name": "demand-forecasting-alireza-2026",
+    "github_owner": "Alirezaemami97",
+    "github_repo": "alireza-demand-forecasting",
+    "connection_arn": "arn:aws:codestar-connections:us-east-1:000000000000:connection/REPLACE-ME",
+    "@aws-cdk/core:newStyleStackSynthesis": true
+  }
+}
